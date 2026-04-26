@@ -239,3 +239,29 @@ Força do candle: {dados['forca_candle']}
             "ativo": symbol.upper(),
             "erro": str(e)
         }
+def calcular_score(dados, ia):
+    score = 0
+
+    # 🔹 TÉCNICO
+    if dados["tendencia"] == "alta" and ia["direcao"] == "compra":
+        score += 25
+    elif dados["tendencia"] == "baixa" and ia["direcao"] == "venda":
+        score += 25
+
+    if dados["volume"] == "alto":
+        score += 20
+
+    if dados["forca_candle"] == "forte":
+        score += 15
+
+    # 🔹 IA
+    if ia["status"] == "operar":
+        score += 25
+
+    if ia["direcao"] != "neutro":
+        score += 10
+
+    if ia["risco"] == "baixo":
+        score += 5
+
+    return min(score, 100)
