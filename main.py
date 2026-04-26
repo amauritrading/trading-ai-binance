@@ -11,7 +11,7 @@ def home():
 # Buscar preço da Binance
 @app.get("/preco/{symbol}")
 def get_preco(symbol: str):
-    url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}"
+    url = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol.upper()}"
     response = requests.get(url)
 
     if response.status_code != 200:
