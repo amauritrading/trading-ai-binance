@@ -7,14 +7,17 @@ app = FastAPI()
 def home():
     return {"status": "online", "sistema": "trading-ai"}
 
+
 def get_klines(symbol):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=5m&limit=50"
     response = requests.get(url, timeout=10)
     response.raise_for_status()
     return response.json()
 
+
 def calcular_ma(closes, periodo):
     return sum(closes[-periodo:]) / periodo
+
 
 def gerar_analise(symbol):
     symbol = symbol.upper()
@@ -57,6 +60,7 @@ def gerar_analise(symbol):
         "forca_candle": forca_candle
     }
 
+
 @app.get("/preco/{symbol}")
 def get_preco(symbol: str):
     symbol = symbol.upper()
@@ -66,6 +70,7 @@ def get_preco(symbol: str):
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
+
         data = response.json()
 
         return {
@@ -79,15 +84,18 @@ def get_preco(symbol: str):
             "erro": str(e)
         }
 
+
 @app.get("/analise/{symbol}")
 def analise(symbol: str):
     try:
         return gerar_analise(symbol)
+
     except Exception as e:
         return {
             "ativo": symbol.upper(),
             "erro": str(e)
         }
+
 
 @app.get("/decisao/{symbol}")
 def decisao(symbol: str):
@@ -98,29 +106,49 @@ def decisao(symbol: str):
         volume = dados["volume"]
         forca_candle = dados["forca_candle"]
 
-        if tendencia == "alta" and volume == "alto" and forca_candle == "forte":
-            status = "operar"
-            direcao = "compra"
-            risco = "medio"
-            explicacao = "Tendência de alta com volume acima da média e candle forte."
+        if tendencia == "alta":
+            if volume == "alto" and forca_candle == "forte":
+                status = "operar"
+                direcao = "compra"
+                risco = "medio"
+                explicacao = "Alta confirmada com volume e força."
 
-        elif tendencia == "baixa" and volume == "alto" and forca_candle == "forte":
-            status = "operar"
-            direcao = "venda"
-            risco = "medio"
-            explicacao = "Tendência de baixa com volume acima da média e candle forte."
+            elif volume == "normal":
+                status = "observar"
+                direcao = "compra"
+                risco = "medio"
+                explicacao = "Tendência de alta sem volume forte."
 
-        elif forca_candle == "fraca" or volume == "normal":
-            status = "observar"
-            direcao = "neutro"
-            risco = "medio"
-            explicacao = "Existe tendência, mas ainda sem confirmação forte de volume e candle."
+            else:
+                status = "nao_operar"
+                direcao = "neutro"
+                risco = "alto"
+                explicacao = "Alta sem força suficiente."
+
+        elif tendencia == "baixa":
+            if volume == "alto" and forca_candle == "forte":
+                status = "operar"
+                direcao = "venda"
+                risco = "medio"
+                explicacao = "Baixa confirmada com volume e força."
+
+            elif volume == "normal":
+                status = "observar"
+                direcao = "venda"
+                risco = "medio"
+                explicacao = "Tendência de baixa sem volume forte."
+
+            else:
+                status = "nao_operar"
+                direcao = "neutro"
+                risco = "alto"
+                explicacao = "Baixa sem força suficiente."
 
         else:
             status = "nao_operar"
             direcao = "neutro"
             risco = "alto"
-            explicacao = "Cenário sem confluência suficiente para entrada."
+            explicacao = "Sem tendência definida."
 
         return {
             "ativo": dados["ativo"],
