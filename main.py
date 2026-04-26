@@ -229,10 +229,13 @@ Força do candle: {dados['forca_candle']}
                 "resposta_bruta": texto
             }
 
-        return {
-            "dados": dados,
-            "analise_ia": analise_json
-        }
+       score = calcular_score(dados, analise_json)
+
+return {
+    "dados": dados,
+    "analise_ia": analise_json,
+    "score": score
+}
 
     except Exception as e:
         return {
