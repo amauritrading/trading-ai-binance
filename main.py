@@ -350,9 +350,9 @@ def executar(
         secret = os.getenv("BINANCE_API_SECRET")
 
         if not api_key or not secret:
-            return {"erro": "API Binance não configurada no Railway"}
+            return {"erro": "API Binance não configurada"}
 
-        # 1) PRIMEIRA VALIDAÇÃO
+        # 🔍 VALIDAÇÃO DUPLA (mantido)
         preview_1 = ordem_preview(symbol)
 
         if not preview_1.get("pode_operar"):
@@ -362,7 +362,6 @@ def executar(
                 "preview": preview_1
             }
 
-        # 2) REVALIDAÇÃO IMEDIATA ANTES DA COMPRA
         time.sleep(1)
 
         preview_2 = ordem_preview(symbol)
@@ -370,15 +369,7 @@ def executar(
         if not preview_2.get("pode_operar"):
             return {
                 "status": "bloqueado",
-                "motivo": "Cenário mudou antes da execução. Compra cancelada.",
-                "preview_inicial": preview_1,
-                "preview_atual": preview_2
-            }
-
-        if preview_1.get("direcao") != preview_2.get("direcao"):
-            return {
-                "status": "bloqueado",
-                "motivo": "Direção mudou antes da execução. Compra cancelada.",
+                "motivo": "Cenário mudou antes da execução.",
                 "preview_inicial": preview_1,
                 "preview_atual": preview_2
             }
@@ -386,13 +377,11 @@ def executar(
         if preview_2.get("score", 0) < 60:
             return {
                 "status": "bloqueado",
-                "motivo": "Score caiu antes da execução. Compra cancelada.",
-                "preview_inicial": preview_1,
-                "preview_atual": preview_2
+                "motivo": "Score caiu antes da execução.",
+                "preview": preview_2
             }
 
         preview = preview_2
-
         config = CONFIG_ATIVOS[symbol]
         valor_usd = config["valor_usd"]
 
@@ -400,7 +389,7 @@ def executar(
             "X-MBX-APIKEY": api_key
         }
 
-        # 3) COMPRA MARKET usando quoteOrderQty = USDT fixo
+        # 🚀 COMPRA MARKET
         params_compra = {
             "symbol": symbol,
             "side": "BUY",
@@ -420,8 +409,7 @@ def executar(
         if resposta_compra.status_code >= 400:
             return {
                 "status": "erro_compra",
-                "resposta_binance": compra_json,
-                "preview": preview
+                "resposta_binance": compra_json
             }
 
         executed_qty = float(compra_json.get("executedQty", 0))
@@ -429,31 +417,30 @@ def executar(
         if executed_qty <= 0:
             return {
                 "status": "erro_compra",
-                "motivo": "Quantidade executada veio zerada",
-                "resposta_binance": compra_json,
-                "preview": preview
+                "motivo": "Quantidade executada veio zerada"
             }
 
-        # reduz levemente para evitar erro caso taxa tenha sido cobrada no ativo comprado
+        # 🔒 PROTEÇÃO (STOP + ALVO)
+        preco_medio = float(compra_json["fills"][0]["price"])
+
+        alvo = preco_medio * 1.02   # +2%
+        stop = preco_medio * 0.99   # -1%
+        stop_limit = preco_medio * 0.989
+
         qty_oco = executed_qty * 0.995
         qty_oco = arredondar(qty_oco, config["qty_decimals"])
 
-        alvo = arredondar(preview["alvo"], config["price_decimals"])
-        stop = arredondar(preview["stop"], config["price_decimals"])
-        stop_limit = arredondar(preview["stop_limit"], config["price_decimals"])
-
-        # 4) OCO DE VENDA: alvo + stop
+        # 🎯 OCO AUTOMÁTICO
         params_oco = {
             "symbol": symbol,
             "side": "SELL",
             "quantity": qty_oco,
             "aboveType": "LIMIT_MAKER",
-            "abovePrice": alvo,
+            "abovePrice": arredondar(alvo, config["price_decimals"]),
             "belowType": "STOP_LOSS_LIMIT",
-            "belowStopPrice": stop,
-            "belowPrice": stop_limit,
+            "belowStopPrice": arredondar(stop, config["price_decimals"]),
+            "belowPrice": arredondar(stop_limit, config["price_decimals"]),
             "belowTimeInForce": "GTC",
-            "newOrderRespType": "RESULT",
             "recvWindow": 5000,
             "timestamp": int(time.time() * 1000)
         }
@@ -466,25 +453,21 @@ def executar(
 
         if resposta_oco.status_code >= 400:
             return {
-                "status": "compra_executada_mas_oco_falhou",
-                "alerta": "A compra foi feita, mas o OCO falhou. Verifique a Binance manualmente.",
+                "status": "compra_ok_sem_oco",
+                "alerta": "Compra executada, mas OCO falhou",
                 "compra": compra_json,
-                "erro_oco": oco_json,
-                "preview": preview
+                "erro_oco": oco_json
             }
 
         return {
             "status": "executado_com_oco",
             "ativo": symbol,
-            "valor_usd": valor_usd,
-            "quantidade_comprada": compra_json.get("executedQty"),
-            "quantidade_oco": qty_oco,
+            "entrada": preco_medio,
             "alvo": alvo,
             "stop": stop,
-            "stop_limit": stop_limit,
+            "quantidade": qty_oco,
             "compra": compra_json,
-            "oco": oco_json,
-            "preview": preview
+            "oco": oco_json
         }
 
     except Exception as e:
@@ -492,128 +475,3 @@ def executar(
             "status": "erro",
             "erro": str(e)
         }
-import requests
-import os
-BASE_URL = "https://trading-ai-binance-production.up.railway.app"
-
-
-def enviar_telegram_com_botoes(mensagem, symbol):
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    approval_token = os.getenv("APPROVAL_TOKEN")
-
-    url_aprovar = f"{BASE_URL}/aprovar/{symbol}?token={approval_token}"
-    url_preview = f"{BASE_URL}/ordem-preview/{symbol}"
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-
-    payload = {
-        "chat_id": chat_id,
-        "text": mensagem,
-        "reply_markup": {
-            "inline_keyboard": [
-                [
-                    {"text": "✅ Aprovar compra", "url": url_aprovar},
-                    {"text": "🔍 Ver preview", "url": url_preview}
-                ]
-            ]
-        }
-    }
-
-    requests.post(url, json=payload)
-
-
-@app.get("/monitorar-agora")
-def monitorar_agora():
-    ativos = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
-    sinais = []
-
-    for ativo in ativos:
-        preview = ordem_preview(ativo)
-
-        if preview.get("pode_operar"):
-            mensagem = (
-                f"🚨 OPORTUNIDADE DETECTADA\n\n"
-                f"Ativo: {ativo}\n"
-                f"Direção: {preview.get('direcao')}\n"
-                f"Score: {preview.get('score')}\n"
-                f"Entrada: {preview.get('entrada')}\n"
-                f"Stop: {preview.get('stop')}\n"
-                f"Alvo: {preview.get('alvo')}\n\n"
-                f"⚠️ Aprove somente se fizer sentido para você."
-            )
-
-            enviar_telegram_com_botoes(mensagem, ativo)
-            sinais.append(preview)
-
-    if not sinais:
-        return {"status": "sem_sinais", "mensagem": "Nenhuma oportunidade agora"}
-
-    return {"status": "alertas_enviados", "sinais": sinais}
-
-
-@app.get("/aprovar/{symbol}")
-def aprovar(symbol: str, token: str):
-    approval_token = os.getenv("APPROVAL_TOKEN")
-
-    if token != approval_token:
-        return {"status": "bloqueado", "motivo": "Token inválido"}
-
-    resultado = executar(symbol, confirmar="SIM")
-    return resultado
-import threading
-
-MONITOR_INTERVALO = 60
-COOLDOWN_ALERTA = 600  # 10 minutos
-ULTIMO_ALERTA = {}
-
-
-def monitor_automatico():
-    ativos = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
-
-    while True:
-        try:
-            agora = time.time()
-
-            for ativo in ativos:
-                preview = ordem_preview(ativo)
-
-                if preview.get("pode_operar"):
-                    ultimo = ULTIMO_ALERTA.get(ativo, 0)
-
-                    if agora - ultimo >= COOLDOWN_ALERTA:
-                        mensagem = (
-                            f"🚨 OPORTUNIDADE DETECTADA\n\n"
-                            f"Ativo: {ativo}\n"
-                            f"Direção: {preview.get('direcao')}\n"
-                            f"Score: {preview.get('score')}\n"
-                            f"Entrada: {preview.get('entrada')}\n"
-                            f"Stop: {preview.get('stop')}\n"
-                            f"Alvo: {preview.get('alvo')}\n\n"
-                            f"⚠️ Sinal com validade curta. Aprove somente se fizer sentido."
-                        )
-
-                        enviar_telegram_com_botoes(mensagem, ativo)
-                        ULTIMO_ALERTA[ativo] = agora
-
-            time.sleep(MONITOR_INTERVALO)
-
-        except Exception as e:
-            print("Erro no monitor automático:", e)
-            time.sleep(MONITOR_INTERVALO)
-
-
-@app.on_event("startup")
-def iniciar_monitor():
-    thread = threading.Thread(target=monitor_automatico, daemon=True)
-    thread.start()
-
-
-@app.get("/status-monitor")
-def status_monitor():
-    return {
-        "status": "monitor_ativo",
-        "intervalo_segundos": MONITOR_INTERVALO,
-        "cooldown_segundos": COOLDOWN_ALERTA,
-        "ativos": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
-    }
