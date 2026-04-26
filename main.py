@@ -270,3 +270,50 @@ Força do candle: {dados['forca_candle']}
             "ativo": symbol.upper(),
             "erro": str(e)
         }
+@app.get("/sinal/{symbol}")
+def sinal(symbol: str):
+    try:
+        # chama sua própria rota IA internamente
+        url = f"http://localhost:8000/ia/{symbol}"
+        
+        # ⚠️ IMPORTANTE: no Railway usar domínio público
+        # substitua por:
+        # url = f"https://trading-ai-binance-production.up.railway.app/ia/{symbol}"
+
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        ia = data.get("analise_ia", {})
+        score = data.get("score", 0)
+
+        status = ia.get("status", "observar")
+        direcao = ia.get("direcao", "neutro")
+
+        # 🎯 LÓGICA DE COR (visual)
+        if score >= 80:
+            cor = "verde_forte"
+            mensagem = "Entrada forte confirmada"
+        elif score >= 60:
+            cor = "verde"
+            mensagem = "Boa oportunidade"
+        elif score >= 40:
+            cor = "amarelo"
+            mensagem = "Observar mercado"
+        else:
+            cor = "vermelho"
+            mensagem = "Evitar operação"
+
+        return {
+            "ativo": symbol.upper(),
+            "status": status,
+            "direcao": direcao,
+            "score": score,
+            "cor": cor,
+            "mensagem": mensagem
+        }
+
+    except Exception as e:
+        return {
+            "ativo": symbol.upper(),
+            "erro": str(e)
+        }
