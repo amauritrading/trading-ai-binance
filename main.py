@@ -3,22 +3,27 @@ import requests
 
 app = FastAPI()
 
-# Rota teste
 @app.get("/")
 def home():
     return {"status": "online", "sistema": "trading-ai"}
 
-# Buscar preço da Binance
 @app.get("/preco/{symbol}")
 def get_preco(symbol: str):
-    url = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol.upper()}"
-    response = requests.get(url)
+    symbol = symbol.upper()
 
-    if response.status_code != 200:
-        return {"erro": "falha ao buscar preço"}
+    url = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol}"
 
-    data = response.json()
-    return {
-        "ativo": symbol.upper(),
-        "preco": data["price"]
-    }
+    try:
+        response = requests.get(url, timeout=10)
+
+        return {
+            "ativo": symbol,
+            "status_code": response.status_code,
+            "resposta_binance": response.text
+        }
+
+    except Exception as e:
+        return {
+            "ativo": symbol,
+            "erro": str(e)
+        }
