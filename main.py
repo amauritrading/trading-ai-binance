@@ -378,3 +378,67 @@ def simular(symbol: str):
             "ativo": symbol.upper(),
             "erro": str(e)
         }
+@app.get("/ordem-preview/{symbol}")
+def ordem_preview(symbol: str):
+    try:
+        url = f"https://trading-ai-binance-production.up.railway.app/ia/{symbol}"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+
+        dados = data.get("dados", {})
+        ia = data.get("analise_ia", {})
+        score = data.get("score", 0)
+
+        preco = dados.get("preco")
+        direcao = ia.get("direcao")
+        status = ia.get("status")
+
+        # 🚫 TRAVA PRINCIPAL
+        if status != "operar" or score < 60:
+            return {
+                "ativo": symbol.upper(),
+                "pode_operar": False,
+                "motivo": "Score baixo ou IA não validou entrada",
+                "score": score
+            }
+
+        # 🎯 RISCO CONTROLADO
+        risco_percentual = 0.003
+        alvo_percentual = 0.006
+
+        if direcao == "compra":
+            entrada = preco
+            stop = preco * (1 - risco_percentual)
+            alvo = preco * (1 + alvo_percentual)
+
+        elif direcao == "venda":
+            entrada = preco
+            stop = preco * (1 + risco_percentual)
+            alvo = preco * (1 - alvo_percentual)
+
+        else:
+            return {
+                "ativo": symbol.upper(),
+                "pode_operar": False,
+                "motivo": "Direção indefinida",
+                "score": score
+            }
+
+        return {
+            "ativo": symbol.upper(),
+            "pode_operar": True,
+            "direcao": direcao,
+            "entrada": round(entrada, 2),
+            "stop": round(stop, 2),
+            "alvo": round(alvo, 2),
+            "risco_percentual": risco_percentual,
+            "alvo_percentual": alvo_percentual,
+            "score": score,
+            "confirmacao_necessaria": True
+        }
+
+    except Exception as e:
+        return {
+            "ativo": symbol.upper(),
+            "erro": str(e)
+        }
