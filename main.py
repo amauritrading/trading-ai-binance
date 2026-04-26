@@ -333,14 +333,46 @@ def executar(
         if not api_key or not secret:
             return {"erro": "API Binance não configurada no Railway"}
 
-        preview = ordem_preview(symbol)
+        # 1) PRIMEIRA VALIDAÇÃO
+        preview_1 = ordem_preview(symbol)
 
-        if not preview.get("pode_operar"):
+        if not preview_1.get("pode_operar"):
             return {
                 "status": "bloqueado",
-                "motivo": preview.get("motivo"),
-                "preview": preview
+                "motivo": preview_1.get("motivo"),
+                "preview": preview_1
             }
+
+        # 2) REVALIDAÇÃO IMEDIATA ANTES DA COMPRA
+        time.sleep(1)
+
+        preview_2 = ordem_preview(symbol)
+
+        if not preview_2.get("pode_operar"):
+            return {
+                "status": "bloqueado",
+                "motivo": "Cenário mudou antes da execução. Compra cancelada.",
+                "preview_inicial": preview_1,
+                "preview_atual": preview_2
+            }
+
+        if preview_1.get("direcao") != preview_2.get("direcao"):
+            return {
+                "status": "bloqueado",
+                "motivo": "Direção mudou antes da execução. Compra cancelada.",
+                "preview_inicial": preview_1,
+                "preview_atual": preview_2
+            }
+
+        if preview_2.get("score", 0) < 60:
+            return {
+                "status": "bloqueado",
+                "motivo": "Score caiu antes da execução. Compra cancelada.",
+                "preview_inicial": preview_1,
+                "preview_atual": preview_2
+            }
+
+        preview = preview_2
 
         config = CONFIG_ATIVOS[symbol]
         valor_usd = config["valor_usd"]
@@ -349,7 +381,7 @@ def executar(
             "X-MBX-APIKEY": api_key
         }
 
-        # 1) COMPRA MARKET usando quoteOrderQty = USDT fixo
+        # 3) COMPRA MARKET usando quoteOrderQty = USDT fixo
         params_compra = {
             "symbol": symbol,
             "side": "BUY",
@@ -369,7 +401,8 @@ def executar(
         if resposta_compra.status_code >= 400:
             return {
                 "status": "erro_compra",
-                "resposta_binance": compra_json
+                "resposta_binance": compra_json,
+                "preview": preview
             }
 
         executed_qty = float(compra_json.get("executedQty", 0))
@@ -378,7 +411,8 @@ def executar(
             return {
                 "status": "erro_compra",
                 "motivo": "Quantidade executada veio zerada",
-                "resposta_binance": compra_json
+                "resposta_binance": compra_json,
+                "preview": preview
             }
 
         # reduz levemente para evitar erro caso taxa tenha sido cobrada no ativo comprado
@@ -389,7 +423,7 @@ def executar(
         stop = arredondar(preview["stop"], config["price_decimals"])
         stop_limit = arredondar(preview["stop_limit"], config["price_decimals"])
 
-        # 2) OCO DE VENDA: alvo + stop
+        # 4) OCO DE VENDA: alvo + stop
         params_oco = {
             "symbol": symbol,
             "side": "SELL",
