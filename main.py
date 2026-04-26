@@ -10,6 +10,22 @@ from urllib.parse import urlencode
 from openai import OpenAI
 
 app = FastAPI()
+# 👉 PRIMEIRO: função
+def enviar_telegram(mensagem):
+    token = os.getenv("TELEGRAM_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    payload = {
+        "chat_id": chat_id,
+        "text": mensagem
+    }
+
+    requests.post(url, json=payload)
+
+
+# 👉 DEPOIS: rota
 @app.get("/teste-telegram")
 def teste_telegram():
     enviar_telegram("🚀 Teste de mensagem do seu sistema!")
