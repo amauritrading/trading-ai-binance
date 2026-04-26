@@ -442,3 +442,57 @@ def ordem_preview(symbol: str):
             "ativo": symbol.upper(),
             "erro": str(e)
         }
+import hmac
+import hashlib
+import time
+
+@app.post("/executar/{symbol}")
+def executar(symbol: str):
+    try:
+        url_preview = f"https://trading-ai-binance-production.up.railway.app/ordem-preview/{symbol}"
+        preview = requests.get(url_preview).json()
+
+        if not preview.get("pode_operar"):
+            return {
+                "status": "bloqueado",
+                "motivo": preview.get("motivo")
+            }
+
+        api_key = os.getenv("BINANCE_API_KEY")
+        secret = os.getenv("BINANCE_API_SECRET")
+
+        if not api_key or not secret:
+            return {"erro": "API não configurada"}
+
+        symbol = symbol.upper()
+        side = "BUY" if preview["direcao"] == "compra" else "SELL"
+
+        quantity = 0.001  # 🔥 MUITO IMPORTANTE: valor pequeno para teste
+
+        timestamp = int(time.time() * 1000)
+
+        params = f"symbol={symbol}&side={side}&type=MARKET&quantity={quantity}&timestamp={timestamp}"
+
+        signature = hmac.new(
+            secret.encode(),
+            params.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        url = f"https://api.binance.com/api/v3/order?{params}&signature={signature}"
+
+        headers = {
+            "X-MBX-APIKEY": api_key
+        }
+
+        response = requests.post(url, headers=headers)
+
+        return {
+            "status": "executado",
+            "resposta_binance": response.json()
+        }
+
+    except Exception as e:
+        return {
+            "erro": str(e)
+        }
