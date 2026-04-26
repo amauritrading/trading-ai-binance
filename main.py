@@ -475,3 +475,12 @@ def executar(
             "status": "erro",
             "erro": str(e)
         }
+@app.get("/aprovar/{symbol}")
+def aprovar(symbol: str, token: str):
+
+    approval_token = os.getenv("APPROVAL_TOKEN")
+
+    if token != approval_token:
+        return {"status": "bloqueado", "motivo": "Token inválido"}
+
+    return executar(symbol, confirmar="SIM")
