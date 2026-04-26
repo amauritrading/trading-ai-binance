@@ -7,23 +7,32 @@ app = FastAPI()
 def home():
     return {"status": "online", "sistema": "trading-ai"}
 
-@app.get("/preco/{symbol}")
-def get_preco(symbol: str):
+def get_klines(symbol):
+    url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=5m&limit=50"
+    response = requests.get(url)
+    return response.json()
+
+def calcular_ma(closes, periodo):
+    return sum(closes[-periodo:]) / periodo
+
+@app.get("/analise/{symbol}")
+def analise(symbol: str):
     symbol = symbol.upper()
 
-    url = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol}"
+    data = get_klines(symbol)
 
-    try:
-        response = requests.get(url, timeout=10)
+    closes = [float(candle[4]) for candle in data]
 
-        return {
-            "ativo": symbol,
-            "status_code": response.status_code,
-            "resposta_binance": response.text
-        }
+    preco_atual = closes[-1]
+    ma7 = calcular_ma(closes, 7)
+    ma25 = calcular_ma(closes, 25)
 
-    except Exception as e:
-        return {
-            "ativo": symbol,
-            "erro": str(e)
-        }
+    tendencia = "alta" if ma7 > ma25 else "baixa"
+
+    return {
+        "ativo": symbol,
+        "preco": preco_atual,
+        "ma7": ma7,
+        "ma25": ma25,
+        "tendencia": tendencia
+    }
