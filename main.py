@@ -494,5 +494,70 @@ def executar(
         }
 import requests
 import os
+BASE_URL = "https://trading-ai-binance-production.up.railway.app"
 
 
+def enviar_telegram_com_botoes(mensagem, symbol):
+    token = os.getenv("TELEGRAM_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    approval_token = os.getenv("APPROVAL_TOKEN")
+
+    url_aprovar = f"{BASE_URL}/aprovar/{symbol}?token={approval_token}"
+    url_preview = f"{BASE_URL}/ordem-preview/{symbol}"
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    payload = {
+        "chat_id": chat_id,
+        "text": mensagem,
+        "reply_markup": {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Aprovar compra", "url": url_aprovar},
+                    {"text": "🔍 Ver preview", "url": url_preview}
+                ]
+            ]
+        }
+    }
+
+    requests.post(url, json=payload)
+
+
+@app.get("/monitorar-agora")
+def monitorar_agora():
+    ativos = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+    sinais = []
+
+    for ativo in ativos:
+        preview = ordem_preview(ativo)
+
+        if preview.get("pode_operar"):
+            mensagem = (
+                f"🚨 OPORTUNIDADE DETECTADA\n\n"
+                f"Ativo: {ativo}\n"
+                f"Direção: {preview.get('direcao')}\n"
+                f"Score: {preview.get('score')}\n"
+                f"Entrada: {preview.get('entrada')}\n"
+                f"Stop: {preview.get('stop')}\n"
+                f"Alvo: {preview.get('alvo')}\n\n"
+                f"⚠️ Aprove somente se fizer sentido para você."
+            )
+
+            enviar_telegram_com_botoes(mensagem, ativo)
+            sinais.append(preview)
+
+    if not sinais:
+        return {"status": "sem_sinais", "mensagem": "Nenhuma oportunidade agora"}
+
+    return {"status": "alertas_enviados", "sinais": sinais}
+
+
+@app.get("/aprovar/{symbol}")
+def aprovar(symbol: str, token: str):
+    approval_token = os.getenv("APPROVAL_TOKEN")
+
+    if token != approval_token:
+        return {"status": "bloqueado", "motivo": "Token inválido"}
+
+    resultado = executar(symbol, confirmar="SIM")
+    return resultado
