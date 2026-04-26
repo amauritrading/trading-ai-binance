@@ -9,30 +9,82 @@ def home():
 
 def get_klines(symbol):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=5m&limit=50"
-    response = requests.get(url)
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
     return response.json()
 
 def calcular_ma(closes, periodo):
     return sum(closes[-periodo:]) / periodo
 
+@app.get("/preco/{symbol}")
+def get_preco(symbol: str):
+    symbol = symbol.upper()
+
+    url = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={symbol}"
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+
+        return {
+            "ativo": symbol,
+            "preco": data["price"]
+        }
+
+    except Exception as e:
+        return {
+            "ativo": symbol,
+            "erro": str(e)
+        }
+
 @app.get("/analise/{symbol}")
 def analise(symbol: str):
     symbol = symbol.upper()
 
-    data = get_klines(symbol)
+    try:
+        data = get_klines(symbol)
 
-    closes = [float(candle[4]) for candle in data]
+        closes = [float(candle[4]) for candle in data]
+        volumes = [float(candle[5]) for candle in data]
 
-    preco_atual = closes[-1]
-    ma7 = calcular_ma(closes, 7)
-    ma25 = calcular_ma(closes, 25)
+        preco_atual = closes[-1]
+        ma7 = calcular_ma(closes, 7)
+        ma25 = calcular_ma(closes, 25)
 
-    tendencia = "alta" if ma7 > ma25 else "baixa"
+        tendencia = "alta" if ma7 > ma25 else "baixa"
 
-    return {
-        "ativo": symbol,
-        "preco": preco_atual,
-        "ma7": ma7,
-        "ma25": ma25,
-        "tendencia": tendencia
-    }
+        volume_atual = volumes[-1]
+        volume_medio = sum(volumes[-10:]) / 10
+        volume_status = "alto" if volume_atual > volume_medio else "normal"
+
+        ultima = data[-1]
+        abertura = float(ultima[1])
+        fechamento = float(ultima[4])
+        maxima = float(ultima[2])
+        minima = float(ultima[3])
+
+        corpo = abs(fechamento - abertura)
+        range_total = maxima - minima
+
+        if range_total == 0:
+            forca_candle = "indefinida"
+        else:
+            forca_candle = "forte" if corpo > (range_total * 0.6) else "fraca"
+
+        return {
+            "ativo": symbol,
+            "preco": preco_atual,
+            "ma7": ma7,
+            "ma25": ma25,
+            "tendencia": tendencia,
+            "volume": volume_status,
+            "forca_candle": forca_candle
+        }
+
+    except Exception as e:
+        return {
+            "ativo": symbol,
+            "erro": str(e)
+        }
