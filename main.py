@@ -561,3 +561,59 @@ def aprovar(symbol: str, token: str):
 
     resultado = executar(symbol, confirmar="SIM")
     return resultado
+import threading
+
+MONITOR_INTERVALO = 60
+COOLDOWN_ALERTA = 600  # 10 minutos
+ULTIMO_ALERTA = {}
+
+
+def monitor_automatico():
+    ativos = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+
+    while True:
+        try:
+            agora = time.time()
+
+            for ativo in ativos:
+                preview = ordem_preview(ativo)
+
+                if preview.get("pode_operar"):
+                    ultimo = ULTIMO_ALERTA.get(ativo, 0)
+
+                    if agora - ultimo >= COOLDOWN_ALERTA:
+                        mensagem = (
+                            f"🚨 OPORTUNIDADE DETECTADA\n\n"
+                            f"Ativo: {ativo}\n"
+                            f"Direção: {preview.get('direcao')}\n"
+                            f"Score: {preview.get('score')}\n"
+                            f"Entrada: {preview.get('entrada')}\n"
+                            f"Stop: {preview.get('stop')}\n"
+                            f"Alvo: {preview.get('alvo')}\n\n"
+                            f"⚠️ Sinal com validade curta. Aprove somente se fizer sentido."
+                        )
+
+                        enviar_telegram_com_botoes(mensagem, ativo)
+                        ULTIMO_ALERTA[ativo] = agora
+
+            time.sleep(MONITOR_INTERVALO)
+
+        except Exception as e:
+            print("Erro no monitor automático:", e)
+            time.sleep(MONITOR_INTERVALO)
+
+
+@app.on_event("startup")
+def iniciar_monitor():
+    thread = threading.Thread(target=monitor_automatico, daemon=True)
+    thread.start()
+
+
+@app.get("/status-monitor")
+def status_monitor():
+    return {
+        "status": "monitor_ativo",
+        "intervalo_segundos": MONITOR_INTERVALO,
+        "cooldown_segundos": COOLDOWN_ALERTA,
+        "ativos": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+    }
