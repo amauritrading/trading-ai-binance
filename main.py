@@ -25,6 +25,32 @@ def calcular_ma(closes, periodo):
     return sum(closes[-periodo:]) / periodo
 
 
+def calcular_score(dados, ia):
+    score = 0
+
+    if dados["tendencia"] == "alta" and ia.get("direcao") == "compra":
+        score += 25
+    elif dados["tendencia"] == "baixa" and ia.get("direcao") == "venda":
+        score += 25
+
+    if dados["volume"] == "alto":
+        score += 20
+
+    if dados["forca_candle"] == "forte":
+        score += 15
+
+    if ia.get("status") == "operar":
+        score += 25
+
+    if ia.get("direcao") != "neutro":
+        score += 10
+
+    if ia.get("risco") == "baixo":
+        score += 5
+
+    return min(score, 100)
+
+
 def gerar_analise(symbol):
     symbol = symbol.upper()
     data = get_klines(symbol)
@@ -210,13 +236,11 @@ Força do candle: {dados['forca_candle']}
 
         texto = resposta.choices[0].message.content.strip()
 
-        # 🔥 limpeza forte
         texto = texto.replace("```json", "")
         texto = texto.replace("```", "")
         texto = texto.replace("\n", "")
         texto = texto.strip()
 
-        # 🔥 extrair JSON puro
         inicio = texto.find("{")
         fim = texto.rfind("}") + 1
         texto = texto[inicio:fim]
@@ -226,45 +250,23 @@ Força do candle: {dados['forca_candle']}
         except Exception:
             analise_json = {
                 "erro": "falha ao interpretar IA",
-                "resposta_bruta": texto
+                "resposta_bruta": texto,
+                "status": "observar",
+                "direcao": "neutro",
+                "risco": "alto",
+                "explicacao": "A IA respondeu fora do formato esperado."
             }
 
-       score = calcular_score(dados, analise_json)
+        score = calcular_score(dados, analise_json)
 
-return {
-    "dados": dados,
-    "analise_ia": analise_json,
-    "score": score
-}
+        return {
+            "dados": dados,
+            "analise_ia": analise_json,
+            "score": score
+        }
 
     except Exception as e:
         return {
             "ativo": symbol.upper(),
             "erro": str(e)
         }
-def calcular_score(dados, ia):
-    score = 0
-
-    # 🔹 TÉCNICO
-    if dados["tendencia"] == "alta" and ia["direcao"] == "compra":
-        score += 25
-    elif dados["tendencia"] == "baixa" and ia["direcao"] == "venda":
-        score += 25
-
-    if dados["volume"] == "alto":
-        score += 20
-
-    if dados["forca_candle"] == "forte":
-        score += 15
-
-    # 🔹 IA
-    if ia["status"] == "operar":
-        score += 25
-
-    if ia["direcao"] != "neutro":
-        score += 10
-
-    if ia["risco"] == "baixo":
-        score += 5
-
-    return min(score, 100)
