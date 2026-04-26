@@ -180,10 +180,9 @@ def ia(symbol: str):
         prompt = f"""
 Você é um analista profissional de trading.
 
-Responda SOMENTE em JSON válido.
-Não use markdown.
-Não use ```json.
-Não escreva nenhum texto fora do JSON.
+RESPONDA APENAS JSON VÁLIDO.
+SEM markdown.
+SEM ```.
 
 Formato obrigatório:
 {{
@@ -193,7 +192,7 @@ Formato obrigatório:
   "explicacao": "curta e técnica"
 }}
 
-Dados técnicos:
+Dados:
 Ativo: {dados['ativo']}
 Preço: {dados['preco']}
 MA7: {dados['ma7']}
@@ -205,23 +204,28 @@ Força do candle: {dados['forca_candle']}
 
         resposta = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1
         )
 
         texto = resposta.choices[0].message.content.strip()
 
+        # 🔥 limpeza forte
         texto = texto.replace("```json", "")
         texto = texto.replace("```", "")
+        texto = texto.replace("\n", "")
         texto = texto.strip()
+
+        # 🔥 extrair JSON puro
+        inicio = texto.find("{")
+        fim = texto.rfind("}") + 1
+        texto = texto[inicio:fim]
 
         try:
             analise_json = json.loads(texto)
         except Exception:
             analise_json = {
-                "erro": "falha ao interpretar resposta da IA",
+                "erro": "falha ao interpretar IA",
                 "resposta_bruta": texto
             }
 
