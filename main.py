@@ -467,7 +467,11 @@ def executar(symbol: str):
         symbol = symbol.upper()
         side = "BUY" if preview["direcao"] == "compra" else "SELL"
 
-        quantity = 0.001  # 🔥 MUITO IMPORTANTE: valor pequeno para teste
+        preco = preview["entrada"]
+
+valor_usd = 10  # 🔥 valor fixo por trade (seguro)
+
+quantity = round(valor_usd / preco, 6)
 
         timestamp = int(time.time() * 1000)
 
