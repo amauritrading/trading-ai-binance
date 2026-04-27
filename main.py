@@ -38,11 +38,13 @@ def enviar_telegram(mensagem, symbol=None, preco=None):
     else:
         reply_markup = None
 
-    payload = {
-        "chat_id": chat_id,
-        "text": mensagem,
-        "reply_markup": reply_markup
-    }
+payload = {
+    "chat_id": chat_id,
+    "text": mensagem
+}
+
+if reply_markup:
+    payload["reply_markup"] = reply_markup
 
     resposta = requests.post(url, json=payload, timeout=10)
     print("TELEGRAM_STATUS:", resposta.status_code)
