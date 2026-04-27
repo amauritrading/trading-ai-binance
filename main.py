@@ -508,6 +508,16 @@ def aprovar(symbol: str, token: str):
     return executar(symbol, confirmar="SIM")
 @app.get("/teste-botao")
 def teste_botao():
-    mensagem = "🚨 TESTE COM BOTÃO"
-    enviar_telegram(mensagem, symbol="BTCUSDT")
-    return {"status": "enviado"}
+    symbol = "BTCUSDT"
+    dados = gerar_analise(symbol)
+    preco_atual = dados["preco"]
+
+    mensagem = f"🚨 TESTE COM BOTÃO\nAtivo: {symbol}\nPreço sinal: {preco_atual}"
+
+    enviar_telegram(mensagem, symbol=symbol, preco=preco_atual)
+
+    return {
+        "status": "enviado",
+        "ativo": symbol,
+        "preco_sinal": preco_atual
+    }
