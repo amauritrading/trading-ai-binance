@@ -20,7 +20,7 @@ def enviar_telegram(mensagem, symbol=None):
 
     # 🔥 botão com ngrok
     if symbol:
-        approval_url = f"https://announcer-yippee-election.ngrok-free.dev/aprovar/{symbol}?token=SEU_TOKEN"
+        approval_url = f"https://SEU_NGROK/aprovar/{symbol}?token=SEU_TOKEN&preco={preco_atual}"
 
         reply_markup = {
             "inline_keyboard": [
