@@ -45,8 +45,8 @@ def enviar_telegram(mensagem, symbol=None, preco=None):
     }
 
     resposta = requests.post(url, json=payload, timeout=10)
-print("TELEGRAM_STATUS:", resposta.status_code)
-print("TELEGRAM_RESPOSTA:", resposta.text)
+    print("TELEGRAM_STATUS:", resposta.status_code)
+    print("TELEGRAM_RESPOSTA:", resposta.text)
 
 
 # 👉 DEPOIS: rota
