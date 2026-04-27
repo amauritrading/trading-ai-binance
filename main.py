@@ -11,11 +11,6 @@ from openai import OpenAI
 
 app = FastAPI()
 # 👉 PRIMEIRO: função
-def enviar_telegram(mensagem):
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
 
 def enviar_telegram(mensagem, symbol=None):
     token = os.getenv("TELEGRAM_TOKEN")
