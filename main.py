@@ -500,3 +500,8 @@ def aprovar(symbol: str, token: str):
         return {"status": "bloqueado", "motivo": "Token inválido"}
 
     return executar(symbol, confirmar="SIM")
+@app.get("/teste-botao")
+def teste_botao():
+    mensagem = "🚨 TESTE COM BOTÃO"
+    enviar_telegram(mensagem, symbol="BTCUSDT")
+    return {"status": "enviado"}
