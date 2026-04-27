@@ -17,9 +17,30 @@ def enviar_telegram(mensagem):
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
+def enviar_telegram(mensagem, symbol=None):
+    token = os.getenv("TELEGRAM_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+
+    # 🔥 botão com ngrok
+    if symbol:
+        approval_url = f"https://announcer-yippee-election.ngrok-free.dev/aprovar/{symbol}?token=SEU_TOKEN"
+
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Aprovar compra", "url": approval_url}
+                ]
+            ]
+        }
+    else:
+        reply_markup = None
+
     payload = {
         "chat_id": chat_id,
-        "text": mensagem
+        "text": mensagem,
+        "reply_markup": reply_markup
     }
 
     requests.post(url, json=payload)
