@@ -18,6 +18,8 @@ def enviar_telegram(mensagem, symbol=None, preco=None):
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
+    reply_markup = None
+
     if symbol and preco:
         tempo = int(time.time())
 
@@ -35,16 +37,14 @@ def enviar_telegram(mensagem, symbol=None, preco=None):
                 ]
             ]
         }
-    else:
-        reply_markup = None
 
-payload = {
-    "chat_id": chat_id,
-    "text": mensagem
-}
+    payload = {
+        "chat_id": chat_id,
+        "text": mensagem
+    }
 
-if reply_markup:
-    payload["reply_markup"] = reply_markup
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
 
     resposta = requests.post(url, json=payload, timeout=10)
     print("TELEGRAM_STATUS:", resposta.status_code)
