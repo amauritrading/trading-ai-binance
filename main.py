@@ -12,15 +12,21 @@ from openai import OpenAI
 app = FastAPI()
 # 👉 PRIMEIRO: função
 
-def enviar_telegram(mensagem, symbol=None):
+def enviar_telegram(mensagem, symbol=None, preco=None):
     token = os.getenv("TELEGRAM_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-    # 🔥 botão com ngrok
-    if symbol:
-        approval_url = f"https://SEU_NGROK/aprovar/{symbol}?token=SEU_TOKEN&preco={preco_atual}"
+    if symbol and preco:
+        tempo = int(time.time())
+
+        approval_url = (
+            f"https://SEU_NGROK/aprovar/{symbol}"
+            f"?token=SEU_TOKEN"
+            f"&preco={preco}"
+            f"&tempo={tempo}"
+        )
 
         reply_markup = {
             "inline_keyboard": [
