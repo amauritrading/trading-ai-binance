@@ -220,7 +220,7 @@ def gerar_analise(symbol):
         "distancia_ma7": round(distancia_ma7, 4),
         "subida_continua": subida_continua
     }
-
+"""
 def gerar_ia(symbol):
     dados = gerar_analise(symbol)
 
@@ -247,6 +247,10 @@ MA25: {dados['ma25']}
 Tendência: {dados['tendencia']}
 Volume: {dados['volume']}
 Força do candle: {dados['forca_candle']}
+RSI: {dados['rsi']}
+Variação recente (5 candles): {dados['variacao_5']}
+Distância da MA7: {dados['distancia_ma7']}
+Subida contínua: {dados['subida_continua']}
 """
 
     resposta = client.chat.completions.create(
