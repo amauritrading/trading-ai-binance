@@ -587,3 +587,54 @@ Alvo: {preview['alvo']}
         "ativo": symbol,
         "preview": preview
     }
+import threading
+
+ultimos_sinais = {}
+ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+
+
+def monitorar_mercado():
+    while True:
+        try:
+            for symbol in ATIVOS_MONITORADOS:
+                agora = time.time()
+
+                if symbol in ultimos_sinais:
+                    if agora - ultimos_sinais[symbol] < 600:
+                        continue
+
+                preview = ordem_preview(symbol)
+
+                if preview.get("pode_operar"):
+                    mensagem = f"""🚨 OPORTUNIDADE DETECTADA
+
+Ativo: {preview['ativo']}
+Direção: {preview['direcao']}
+Score: {preview['score']}
+Entrada: {preview['entrada']}
+Stop: {preview['stop']}
+Alvo: {preview['alvo']}
+
+⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
+
+                    enviar_telegram(
+                        mensagem,
+                        symbol=symbol,
+                        preco=preview["entrada"],
+                        tempo=int(time.time())
+                    )
+
+                    ultimos_sinais[symbol] = agora
+
+                time.sleep(3)
+
+        except Exception as e:
+            print("ERRO_MONITORAMENTO:", str(e))
+
+        time.sleep(60)
+
+
+@app.on_event("startup")
+def iniciar_monitoramento():
+    thread = threading.Thread(target=monitorar_mercado, daemon=True)
+    thread.start()
