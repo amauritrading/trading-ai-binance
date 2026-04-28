@@ -220,7 +220,7 @@ def gerar_analise(symbol):
         "distancia_ma7": round(distancia_ma7, 4),
         "subida_continua": subida_continua
     }
-"""
+
 def gerar_ia(symbol):
     dados = gerar_analise(symbol)
 
