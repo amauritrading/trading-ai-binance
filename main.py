@@ -20,8 +20,25 @@ def enviar_telegram(mensagem, symbol=None, preco=None):
 
     reply_markup = None
 
-    if symbol:
-        approval_url = f"https://announcer-yippee-election.ngrok-free.dev/aprovar/{symbol}?token={os.getenv('APPROVAL_TOKEN')}"
+reply_markup = None
+
+if symbol and preco:
+    tempo = int(time.time())
+
+    approval_url = (
+        f"https://announcer-yippee-election.ngrok-free.dev/aprovar/{symbol}"
+        f"?token={os.getenv('APPROVAL_TOKEN')}"
+        f"&preco={preco}"
+        f"&tempo={tempo}"
+    )
+
+    reply_markup = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Aprovar compra", "url": approval_url}
+            ]
+        ]
+    }
 
         reply_markup = {
             "inline_keyboard": [
