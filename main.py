@@ -335,8 +335,8 @@ def ordem_preview(symbol: str):
                 "score": score
             }
 
-        risco_percentual = 0.003
-        alvo_percentual = 0.006
+        risco_percentual = 0.01
+        alvo_percentual = 0.02
 
         entrada = preco
         stop = preco * (1 - risco_percentual)
