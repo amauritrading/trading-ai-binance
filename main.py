@@ -133,28 +133,62 @@ def calcular_score(dados, ia):
 
     return min(score, 100)
 
+def calcular_rsi(closes, periodo=14):
+    ganhos = []
+    perdas = []
+
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        if diff > 0:
+            ganhos.append(diff)
+            perdas.append(0)
+        else:
+            ganhos.append(0)
+            perdas.append(abs(diff))
+
+    media_ganhos = sum(ganhos[-periodo:]) / periodo
+    media_perdas = sum(perdas[-periodo:]) / periodo
+
+    if media_perdas == 0:
+        return 100
+
+    rs = media_ganhos / media_perdas
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
 
 def gerar_analise(symbol):
     symbol = symbol.upper()
 
     if symbol not in CONFIG_ATIVOS:
-        raise ValueError("Ativo não permitido. Use BTCUSDT, ETHUSDT, SOLUSDT ou BNBUSDT.")
+        raise ValueError("Ativo não permitido.")
 
     data = get_klines(symbol)
 
-    closes = [float(candle[4]) for candle in data]
-    volumes = [float(candle[5]) for candle in data]
+    closes = [float(c[4]) for c in data]
+    volumes = [float(c[5]) for c in data]
 
-    preco_atual = closes[-1]
+    preco = closes[-1]
     ma7 = calcular_ma(closes, 7)
     ma25 = calcular_ma(closes, 25)
 
     tendencia = "alta" if ma7 > ma25 else "baixa"
 
+    # 📊 RSI
+    rsi = calcular_rsi(closes)
+
+    # 📈 Variação recente
+    variacao_5 = (closes[-1] - closes[-5]) / closes[-5]
+
+    # 📉 Distância da média
+    distancia_ma7 = (preco - ma7) / ma7
+
+    # 📊 Volume
     volume_atual = volumes[-1]
     volume_medio = sum(volumes[-10:]) / 10
     volume_status = "alto" if volume_atual > volume_medio else "normal"
 
+    # 📉 Candle atual
     ultima = data[-1]
     abertura = float(ultima[1])
     fechamento = float(ultima[4])
@@ -169,16 +203,23 @@ def gerar_analise(symbol):
     else:
         forca_candle = "forte" if corpo > (range_total * 0.6) else "fraca"
 
+    # 📉 Sequência de candles
+    ultimos = closes[-4:]
+    subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
+
     return {
         "ativo": symbol,
-        "preco": preco_atual,
+        "preco": preco,
         "ma7": ma7,
         "ma25": ma25,
         "tendencia": tendencia,
         "volume": volume_status,
-        "forca_candle": forca_candle
+        "forca_candle": forca_candle,
+        "rsi": round(rsi, 2),
+        "variacao_5": round(variacao_5, 4),
+        "distancia_ma7": round(distancia_ma7, 4),
+        "subida_continua": subida_continua
     }
-
 
 def gerar_ia(symbol):
     dados = gerar_analise(symbol)
