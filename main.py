@@ -566,7 +566,7 @@ Alvo: {preview['alvo']}
 
 ⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
 
-    enviar_telegram(mensagem, symbol=symbol)
+    enviar_telegram(mensagem, symbol=symbol, preco=preview["entrada"])
 
     return {
         "status": "alerta_enviado",
