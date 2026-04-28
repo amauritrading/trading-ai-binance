@@ -224,8 +224,31 @@ def gerar_analise(symbol):
 def gerar_ia(symbol):
     dados = gerar_analise(symbol)
 
-    prompt = f"""
-Você é um analista profissional de trading.
+prompt = f"""
+Você é um analista profissional de trading focado em operações curtas (scalp/curto prazo).
+
+OBJETIVO:
+Identificar oportunidades com potencial de aproximadamente +2% de movimento, com risco controlado.
+
+REGRAS IMPORTANTES:
+
+1. NÃO recomendar entrada se:
+- RSI > 70 (sobrecompra)
+- subida_continua = true (mercado esticado)
+- variacao_5 muito positiva (> 0.01) → possível topo
+- preço muito distante da MA7 (> 0.01)
+
+2. PRIORIDADE para compra quando:
+- tendência = alta
+- RSI entre 40 e 65
+- preço próximo da MA7
+- leve correção recente (variacao_5 negativa ou neutra)
+- volume alto OU candle forte
+
+3. Se houver dúvida → NÃO operar
+
+4. Seja conservador:
+Prefira perder uma oportunidade do que entrar errado.
 
 RESPONDA APENAS JSON VÁLIDO.
 SEM markdown.
