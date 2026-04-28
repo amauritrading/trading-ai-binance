@@ -224,57 +224,57 @@ def gerar_analise(symbol):
 def gerar_ia(symbol):
     dados = gerar_analise(symbol)
 
-prompt = f"""
-Você é um analista profissional de trading focado em operações curtas (scalp/curto prazo).
+    prompt = f"""
+    Você é um analista profissional de trading focado em operações curtas (scalp/curto prazo).
 
-OBJETIVO:
-Identificar oportunidades com potencial de aproximadamente +2% de movimento, com risco controlado.
+    OBJETIVO:
+    Identificar oportunidades com potencial de aproximadamente +2% de movimento, com risco controlado.
 
-REGRAS IMPORTANTES:
+    REGRAS IMPORTANTES:
 
-1. NÃO recomendar entrada se:
-- RSI > 70 (sobrecompra)
-- subida_continua = true (mercado esticado)
-- variacao_5 muito positiva (> 0.01) → possível topo
-- preço muito distante da MA7 (> 0.01)
+    1. NÃO recomendar entrada se:
+    - RSI > 70 (sobrecompra)
+    - subida_continua = true (mercado esticado)
+    - variacao_5 muito positiva (> 0.01) → possível topo
+    - preço muito distante da MA7 (> 0.01)
 
-2. PRIORIDADE para compra quando:
-- tendência = alta
-- RSI entre 40 e 65
-- preço próximo da MA7
-- leve correção recente (variacao_5 negativa ou neutra)
-- volume alto OU candle forte
+    2. PRIORIDADE para compra quando:
+    - tendência = alta
+    - RSI entre 40 e 65
+    - preço próximo da MA7
+    - leve correção recente (variacao_5 negativa ou neutra)
+    - volume alto OU candle forte
 
-3. Se houver dúvida → NÃO operar
+    3. Se houver dúvida → NÃO operar
 
-4. Seja conservador:
-Prefira perder uma oportunidade do que entrar errado.
+    4. Seja conservador:
+    Prefira perder uma oportunidade do que entrar errado.
 
-RESPONDA APENAS JSON VÁLIDO.
-SEM markdown.
-SEM ```.
+    RESPONDA APENAS JSON VÁLIDO.
+    SEM markdown.
+    SEM uso de markdown.
 
-Formato obrigatório:
-{{
-  "status": "operar | observar | nao_operar",
-  "direcao": "compra | venda | neutro",
-  "risco": "baixo | medio | alto",
-  "explicacao": "curta e técnica"
-}}
+    Formato obrigatório:
+    {{
+    "status": "operar | observar | nao_operar",
+    "direcao": "compra | venda | neutro",
+    "risco": "baixo | medio | alto",
+    "explicacao": "curta e técnica"
+    }}
 
-Dados:
-Ativo: {dados['ativo']}
-Preço: {dados['preco']}
-MA7: {dados['ma7']}
-MA25: {dados['ma25']}
-Tendência: {dados['tendencia']}
-Volume: {dados['volume']}
-Força do candle: {dados['forca_candle']}
-RSI: {dados['rsi']}
-Variação recente (5 candles): {dados['variacao_5']}
-Distância da MA7: {dados['distancia_ma7']}
-Subida contínua: {dados['subida_continua']}
-"""
+    Dados:
+    Ativo: {dados['ativo']}
+    Preço: {dados['preco']}
+    MA7: {dados['ma7']}
+    MA25: {dados['ma25']}
+    Tendência: {dados['tendencia']}
+    Volume: {dados['volume']}
+    Força do candle: {dados['forca_candle']}
+    RSI: {dados['rsi']}
+    Variação recente (5 candles): {dados['variacao_5']}
+    Distância da MA7: {dados['distancia_ma7']}
+    Subida contínua: {dados['subida_continua']}
+    """
 
     resposta = client.chat.completions.create(
         model="gpt-4o-mini",
