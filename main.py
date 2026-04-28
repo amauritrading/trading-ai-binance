@@ -20,15 +20,8 @@ def enviar_telegram(mensagem, symbol=None, preco=None):
 
     reply_markup = None
 
-    if symbol and preco:
-        tempo = int(time.time())
-
-        approval_url = (
-            f"https://SEU_NGROK/aprovar/{symbol}"
-            f"?token=SEU_TOKEN"
-            f"&preco={preco}"
-            f"&tempo={tempo}"
-        )
+    if symbol:
+        approval_url = f"https://announcer-yippee-election.ngrok-free.dev/aprovar/{symbol}?token={os.getenv('APPROVAL_TOKEN')}"
 
         reply_markup = {
             "inline_keyboard": [
@@ -43,15 +36,12 @@ def enviar_telegram(mensagem, symbol=None, preco=None):
         "text": mensagem
     }
 
-    if reply_markup is not None:
+    if reply_markup:
         payload["reply_markup"] = reply_markup
 
     resposta = requests.post(url, json=payload, timeout=10)
     print("TELEGRAM_STATUS:", resposta.status_code)
     print("TELEGRAM_RESPOSTA:", resposta.text)
-
-
-# 👉 DEPOIS: rota
 @app.get("/teste-telegram")
 def teste_telegram():
     enviar_telegram("🚀 Teste de mensagem do seu sistema!")
