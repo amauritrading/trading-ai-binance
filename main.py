@@ -234,6 +234,7 @@ def gerar_ia(symbol):
 
     1. NÃO recomendar entrada se:
     - RSI > 70 (sobrecompra)
+    - candle fraco E volume normal → evitar entrada
     - subida_continua = true (mercado esticado)
     - variacao_5 muito positiva (> 0.01) → possível topo
     - preço muito distante da MA7 (> 0.01)
