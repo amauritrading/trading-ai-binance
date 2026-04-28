@@ -515,3 +515,35 @@ def teste_botao():
         "ativo": symbol,
         "preco_sinal": preco_atual
     }
+@app.get("/alerta-teste/{symbol}")
+def alerta_teste(symbol: str):
+    symbol = symbol.upper()
+
+    preview = ordem_preview(symbol)
+
+    if not preview.get("pode_operar"):
+        return {
+            "status": "sem_alerta",
+            "ativo": symbol,
+            "motivo": preview.get("motivo"),
+            "preview": preview
+        }
+
+    mensagem = f"""🚨 OPORTUNIDADE DETECTADA
+
+Ativo: {preview['ativo']}
+Direção: {preview['direcao']}
+Score: {preview['score']}
+Entrada: {preview['entrada']}
+Stop: {preview['stop']}
+Alvo: {preview['alvo']}
+
+⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
+
+    enviar_telegram(mensagem, symbol=symbol)
+
+    return {
+        "status": "alerta_enviado",
+        "ativo": symbol,
+        "preview": preview
+    }
