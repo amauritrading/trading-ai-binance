@@ -532,7 +532,12 @@ def teste_botao():
     dados = gerar_analise(symbol)
     preco_atual = dados["preco"]
 
-    mensagem = f"🚨 TESTE COM BOTÃO\nAtivo: {symbol}\nPreço sinal: {preco_atual}"
+    enviar_telegram(
+    mensagem,
+    symbol=symbol,
+    preco=preco_atual,
+    tempo=int(time.time())
+)
 
     enviar_telegram(mensagem, symbol=symbol, preco=preco_atual)
 
