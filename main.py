@@ -513,7 +513,12 @@ def executar(
             "erro": str(e)
         }
 @app.get("/aprovar/{symbol}")
-def aprovar(symbol: str, token: str):
+def aprovar(
+    symbol: str,
+    token: str,
+    preco: float = None,
+    tempo: int = None
+):
 
     approval_token = os.getenv("APPROVAL_TOKEN")
 
