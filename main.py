@@ -12,7 +12,7 @@ from openai import OpenAI
 app = FastAPI()
 # 👉 PRIMEIRO: função
 
-def enviar_telegram(mensagem, symbol=None, preco=None):
+def enviar_telegram(mensagem, symbol=None, preco=None, tempo=None):
     token = os.getenv("TELEGRAM_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -21,7 +21,8 @@ def enviar_telegram(mensagem, symbol=None, preco=None):
     reply_markup = None
 
     if symbol and preco:
-        tempo = int(time.time())
+        if tempo is None:
+            tempo = int(time.time())
 
         approval_url = (
             f"https://announcer-yippee-election.ngrok-free.dev/aprovar/{symbol}"
