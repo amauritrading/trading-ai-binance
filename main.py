@@ -96,6 +96,19 @@ def arredondar(valor, casas):
     quant = Decimal("1") / (Decimal("10") ** casas)
     return str(Decimal(str(valor)).quantize(quant, rounding=ROUND_DOWN))
 
+def registrar_evento(tipo, dados):
+    try:
+        evento = {
+            "tipo": tipo,
+            "timestamp": int(time.time()),
+            **dados
+        }
+
+        with open("trades_log.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(evento, ensure_ascii=False) + "\n")
+
+    except Exception as e:
+        print("ERRO_LOG:", str(e))
 
 def get_klines(symbol):
     url = f"{BINANCE_DATA_URL}/api/v3/klines?symbol={symbol}&interval=5m&limit=50"
