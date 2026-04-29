@@ -36,15 +36,12 @@ def calcular_arbitragem(precos):
         bid_ethbtc = precos["ETHBTC"]["bid"]
         bid_btcusdt = precos["BTCUSDT"]["bid"]
 
-        # 1. USDT -> ETH
         eth = usdt_inicial / ask_ethusdt
         eth *= (1 - TAXA)
 
-        # 2. ETH -> BTC
         btc = eth * bid_ethbtc
         btc *= (1 - TAXA)
 
-        # 3. BTC -> USDT
         usdt_final = btc * bid_btcusdt
         usdt_final *= (1 - TAXA)
 
