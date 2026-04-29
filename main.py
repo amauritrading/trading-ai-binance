@@ -396,7 +396,7 @@ def ordem_preview(symbol: str):
         direcao = ia.get("direcao")
         status = ia.get("status")
 
-        if status != "operar" or score < 60:
+        if status != "operar" or score < 85:
             return {
                 "ativo": symbol,
                 "pode_operar": False,
