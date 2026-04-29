@@ -686,8 +686,15 @@ def monitorar_mercado():
                         continue
 
                 preview = ordem_preview(symbol)
-
+                
                 if preview.get("pode_operar"):
+                    
+                    registrar_evento("sinal_detectado", {
+                        "symbol": symbol,
+                        "score": preview.get("score"),
+                        "entrada": preview.get("entrada")
+                    })
+                
                     mensagem = f"""🚨 OPORTUNIDADE DETECTADA
 
 Ativo: {preview['ativo']}
