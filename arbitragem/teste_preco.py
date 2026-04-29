@@ -3,6 +3,8 @@ import time
 
 URL = "https://api.binance.com/api/v3/ticker/bookTicker"
 
+TAXA = 0.001  # 0.1%
+
 def obter_precos():
     try:
         response = requests.get(URL, timeout=5)
@@ -26,22 +28,39 @@ def obter_precos():
         print("Erro ao obter preços:", e)
         return {}
 
-def mostrar_pares(precos):
-    pares_interesse = ["BTCUSDT", "ETHUSDT", "ETHBTC"]
+def calcular_arbitragem(precos):
+    try:
+        usdt_inicial = 10
 
-    print("\n--- PREÇOS ATUALIZADOS ---")
+        ask_ethusdt = precos["ETHUSDT"]["ask"]
+        bid_ethbtc = precos["ETHBTC"]["bid"]
+        bid_btcusdt = precos["BTCUSDT"]["bid"]
 
-    for par in pares_interesse:
-        if par in precos:
-            bid = precos[par]["bid"]
-            ask = precos[par]["ask"]
+        # 1. USDT -> ETH
+        eth = usdt_inicial / ask_ethusdt
+        eth *= (1 - TAXA)
 
-            print(f"{par} | BID: {bid} | ASK: {ask}")
-        else:
-            print(f"{par} não encontrado")
+        # 2. ETH -> BTC
+        btc = eth * bid_ethbtc
+        btc *= (1 - TAXA)
+
+        # 3. BTC -> USDT
+        usdt_final = btc * bid_btcusdt
+        usdt_final *= (1 - TAXA)
+
+        lucro = usdt_final - usdt_inicial
+        perc = (lucro / usdt_inicial) * 100
+
+        print("\n--- ARBITRAGEM ---")
+        print(f"Inicial: {usdt_inicial:.2f} USDT")
+        print(f"Final: {usdt_final:.4f} USDT")
+        print(f"Lucro: {lucro:.4f} USDT ({perc:.2f}%)")
+
+    except Exception as e:
+        print("Erro na arbitragem:", e)
 
 if __name__ == "__main__":
     while True:
         precos = obter_precos()
-        mostrar_pares(precos)
+        calcular_arbitragem(precos)
         time.sleep(2)
