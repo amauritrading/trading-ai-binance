@@ -707,21 +707,3 @@ Alvo: {preview['alvo']}
 def iniciar_monitoramento():
     thread = threading.Thread(target=monitorar_mercado, daemon=True)
     thread.start()
-@app.post("/alerta-arbitragem")
-def alerta_arbitragem(data: dict):
-    try:
-        mensagem = f"""🔥 ARBITRAGEM DETECTADA
-
-Ciclo: {data['ciclo']}
-Lucro: {data['lucro']:.4f} USDT
-Percentual: {data['percentual']:.2f}%
-
-⚠️ Execução rápida necessária
-"""
-
-        enviar_telegram(mensagem)
-
-        return {"status": "enviado"}
-
-    except Exception as e:
-        return {"erro": str(e)}
