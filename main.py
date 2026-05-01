@@ -543,9 +543,9 @@ def executar(
         # 🔒 PROTEÇÃO (STOP + ALVO)
         preco_medio = float(compra_json["fills"][0]["price"])
 
-        alvo = preco_medio * 1.02   # +2%
-        stop = preco_medio * 0.99   # -1%
-        stop_limit = preco_medio * 0.989
+        alvo = preco_medio * 1.01   # +1%
+        stop = preco_medio * 0.994  # -0.6%
+        stop_limit = preco_medio * 0.993  # pequena folga
 
         qty_oco = executed_qty * 0.995
         qty_oco = arredondar(qty_oco, config["qty_decimals"])
