@@ -8,13 +8,74 @@ import hashlib
 from decimal import Decimal, ROUND_DOWN
 from urllib.parse import urlencode
 from openai import OpenAI
+import threading
 
 app = FastAPI()
-# 👉 PRIMEIRO: função
+
+# =========================
+# CONFIGURAÇÕES GERAIS
+# =========================
+
+BINANCE_API_URL = "https://api.binance.com"
+BINANCE_DATA_URL = "https://data-api.binance.vision"
+
+VALOR_POR_TRADE_USDT = 50
+
+EXECUTOR_BASE_URL = os.getenv(
+    "EXECUTOR_BASE_URL",
+    "https://announcer-yippee-election.ngrok-free.dev"
+)
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+CONFIG_ATIVOS = {
+    "BTCUSDT": {
+        "valor_usd": VALOR_POR_TRADE_USDT,
+        "qty_decimals": 6,
+        "price_decimals": 2,
+        "grupo": "CORE"
+    },
+    "ETHUSDT": {
+        "valor_usd": VALOR_POR_TRADE_USDT,
+        "qty_decimals": 5,
+        "price_decimals": 2,
+        "grupo": "CORE"
+    },
+    "XRPUSDT": {
+        "valor_usd": VALOR_POR_TRADE_USDT,
+        "qty_decimals": 1,
+        "price_decimals": 4,
+        "grupo": "ALT"
+    },
+    "LINKUSDT": {
+        "valor_usd": VALOR_POR_TRADE_USDT,
+        "qty_decimals": 2,
+        "price_decimals": 2,
+        "grupo": "ALT"
+    },
+}
+
+GRUPOS = {
+    "CORE": ["BTCUSDT", "ETHUSDT"],
+    "ALT": ["XRPUSDT", "LINKUSDT"]
+}
+
+ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "LINKUSDT"]
+
+ultimos_sinais = {}
+
+
+# =========================
+# TELEGRAM
+# =========================
 
 def enviar_telegram(mensagem, symbol=None, preco=None, tempo=None):
     token = os.getenv("TELEGRAM_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+    if not token or not chat_id:
+        print("TELEGRAM_NAO_CONFIGURADO")
+        return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
 
@@ -25,7 +86,7 @@ def enviar_telegram(mensagem, symbol=None, preco=None, tempo=None):
             tempo = int(time.time())
 
         approval_url = (
-            f"https://announcer-yippee-election.ngrok-free.dev/aprovar/{symbol}"
+            f"{EXECUTOR_BASE_URL}/aprovar/{symbol}"
             f"?token={os.getenv('APPROVAL_TOKEN')}"
             f"&preco={preco}"
             f"&tempo={tempo}"
@@ -41,7 +102,7 @@ def enviar_telegram(mensagem, symbol=None, preco=None, tempo=None):
 
     elif symbol:
         approval_url = (
-            f"https://announcer-yippee-election.ngrok-free.dev/aprovar/{symbol}"
+            f"{EXECUTOR_BASE_URL}/aprovar/{symbol}"
             f"?token={os.getenv('APPROVAL_TOKEN')}"
         )
 
@@ -61,29 +122,41 @@ def enviar_telegram(mensagem, symbol=None, preco=None, tempo=None):
     if reply_markup:
         payload["reply_markup"] = reply_markup
 
-    resposta = requests.post(url, json=payload, timeout=10)
-    print("TELEGRAM_STATUS:", resposta.status_code)
-    print("TELEGRAM_RESPOSTA:", resposta.text)
+    try:
+        resposta = requests.post(url, json=payload, timeout=10)
+        print("TELEGRAM_STATUS:", resposta.status_code)
+        print("TELEGRAM_RESPOSTA:", resposta.text)
+    except Exception as e:
+        print("ERRO_TELEGRAM:", str(e))
+
+
 @app.get("/teste-telegram")
 def teste_telegram():
-    enviar_telegram("🚀 Teste de mensagem do seu sistema!")
+    enviar_telegram("🚀 Teste de mensagem do sistema Railway!")
     return {"status": "mensagem enviada"}
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-BINANCE_API_URL = "https://api.binance.com"
-BINANCE_DATA_URL = "https://data-api.binance.vision"
 
-CONFIG_ATIVOS = {
-    "BTCUSDT": {"valor_usd": 10, "qty_decimals": 6, "price_decimals": 2},
-    "ETHUSDT": {"valor_usd": 10, "qty_decimals": 5, "price_decimals": 2},
-    "SOLUSDT": {"valor_usd": 10, "qty_decimals": 3, "price_decimals": 2},
-    "BNBUSDT": {"valor_usd": 10, "qty_decimals": 3, "price_decimals": 2},
-}
-
+# =========================
+# ROTAS BASE
+# =========================
 
 @app.get("/")
 def home():
-    return {"status": "online", "sistema": "trading-ai"}
+    return {
+        "status": "online",
+        "sistema": "trading-ai",
+        "ativos_monitorados": ATIVOS_MONITORADOS,
+        "valor_por_trade_usdt": VALOR_POR_TRADE_USDT
+    }
+
+
+# =========================
+# UTILITÁRIOS
+# =========================
+
+def obter_grupo(symbol):
+    symbol = symbol.upper()
+    return CONFIG_ATIVOS.get(symbol, {}).get("grupo")
 
 
 def assinar_params(params: dict, secret: str):
@@ -95,6 +168,7 @@ def assinar_params(params: dict, secret: str):
 def arredondar(valor, casas):
     quant = Decimal("1") / (Decimal("10") ** casas)
     return str(Decimal(str(valor)).quantize(quant, rounding=ROUND_DOWN))
+
 
 def registrar_evento(tipo, dados):
     try:
@@ -110,6 +184,11 @@ def registrar_evento(tipo, dados):
     except Exception as e:
         print("ERRO_LOG:", str(e))
 
+
+# =========================
+# BINANCE DATA
+# =========================
+
 def get_klines(symbol):
     url = f"{BINANCE_DATA_URL}/api/v3/klines?symbol={symbol}&interval=5m&limit=50"
     response = requests.get(url, timeout=10)
@@ -120,31 +199,6 @@ def get_klines(symbol):
 def calcular_ma(closes, periodo):
     return sum(closes[-periodo:]) / periodo
 
-
-def calcular_score(dados, ia):
-    score = 0
-
-    if dados["tendencia"] == "alta" and ia.get("direcao") == "compra":
-        score += 25
-    if dados["tendencia"] == "alta" and ia.get("direcao") == "compra":
-        score += 25
-
-    if dados["volume"] == "alto":
-        score += 20
-
-    if dados["forca_candle"] == "forte":
-        score += 15
-
-    if ia.get("status") == "operar":
-        score += 25
-
-    if ia.get("direcao") != "neutro":
-        score += 10
-
-    if ia.get("risco") == "baixo":
-        score += 5
-
-    return min(score, 100)
 
 def calcular_rsi(closes, periodo=14):
     ganhos = []
@@ -170,6 +224,34 @@ def calcular_rsi(closes, periodo=14):
     return rsi
 
 
+def calcular_score(dados, ia):
+    score = 0
+
+    if dados["tendencia"] == "alta" and ia.get("direcao") == "compra":
+        score += 25
+
+    if dados["volume"] == "alto":
+        score += 20
+
+    if dados["forca_candle"] == "forte":
+        score += 15
+
+    if ia.get("status") == "operar":
+        score += 25
+
+    if ia.get("direcao") == "compra":
+        score += 10
+
+    if ia.get("risco") == "baixo":
+        score += 5
+
+    return min(score, 100)
+
+
+# =========================
+# ANÁLISE TÉCNICA
+# =========================
+
 def gerar_analise(symbol):
     symbol = symbol.upper()
 
@@ -187,21 +269,16 @@ def gerar_analise(symbol):
 
     tendencia = "alta" if ma7 > ma25 else "baixa"
 
-    # 📊 RSI
     rsi = calcular_rsi(closes)
 
-    # 📈 Variação recente
     variacao_5 = (closes[-1] - closes[-5]) / closes[-5]
 
-    # 📉 Distância da média
     distancia_ma7 = (preco - ma7) / ma7
 
-    # 📊 Volume
     volume_atual = volumes[-1]
     volume_medio = sum(volumes[-10:]) / 10
     volume_status = "alto" if volume_atual > volume_medio else "normal"
 
-    # 📉 Candle atual
     ultima = data[-1]
     abertura = float(ultima[1])
     fechamento = float(ultima[4])
@@ -216,12 +293,12 @@ def gerar_analise(symbol):
     else:
         forca_candle = "forte" if corpo > (range_total * 0.6) else "fraca"
 
-    # 📉 Sequência de candles
     ultimos = closes[-4:]
     subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
 
     return {
         "ativo": symbol,
+        "grupo": obter_grupo(symbol),
         "preco": preco,
         "ma7": ma7,
         "ma25": ma25,
@@ -234,40 +311,59 @@ def gerar_analise(symbol):
         "subida_continua": subida_continua
     }
 
+
+# =========================
+# IA
+# =========================
+
 def gerar_ia(symbol):
     dados = gerar_analise(symbol)
 
     prompt = f"""
-Você é um analista quantitativo profissional de trading em criptomoedas (spot, curto prazo).
+Você é um analista quantitativo profissional de trading em criptomoedas spot, curto prazo.
 
 OBJETIVO:
-Identificar oportunidades de scalp com alvo curto (~1%) e risco controlado.
+Identificar oportunidades de scalp com alvo curto aproximado de +1% e risco controlado de -0,6%.
 
-IMPORTANTE:
-O sistema opera com dinheiro real. Seja conservador.
+CONTEXTO DO SISTEMA:
+- O sistema opera com dinheiro real.
+- Entrada final é manual via aprovação no Telegram.
+- Execução real é feita por executor local.
+- O robô permite no máximo 2 trades simultâneos.
+- Grupos:
+  CORE = BTCUSDT, ETHUSDT
+  ALT = XRPUSDT, LINKUSDT
+- A análise deste ativo deve ser individual, mas extremamente conservadora.
+- Não buscar quantidade de sinais. Buscar qualidade.
 
-REGRAS DE BLOQUEIO (NÃO OPERAR):
+REGRAS DE BLOQUEIO — NÃO OPERAR:
 
-- RSI > 65 (sobrecompra)
+- RSI > 65
+- RSI < 38
 - candle fraco E volume normal
-- subida_continua = true (mercado esticado)
-- variacao_5 > 0.008 (movimento já ocorreu)
-- distancia_ma7 > 0.008 (preço esticado)
+- subida_continua = true
+- variacao_5 > 0.008
+- distancia_ma7 > 0.008
+- tendência de baixa
 - tendência indefinida ou lateral
+- preço muito esticado em relação à MA7
+- movimento já realizado antes da entrada
 
 REGRAS PARA OPERAR:
 
 - tendência = alta
-- RSI entre 40 e 60
-- preço próximo da MA7 (pullback leve)
-- variacao_5 levemente negativa ou neutra
+- RSI preferencialmente entre 40 e 60
+- preço próximo da MA7
+- variação recente neutra ou levemente negativa
 - volume alto OU candle forte
+- entrada com espaço real até o alvo de +1%
+- risco de reversão baixo
 
 REGRA CRÍTICA:
+Se não houver clareza, responda nao_operar.
 
-Se não houver clareza → NÃO OPERAR
-
-FORMATO DE RESPOSTA (JSON PURO):
+FORMATO DE RESPOSTA:
+Responda somente JSON puro, sem markdown:
 
 {{
 "status": "operar | observar | nao_operar",
@@ -279,6 +375,7 @@ FORMATO DE RESPOSTA (JSON PURO):
 
 Dados:
 Ativo: {dados['ativo']}
+Grupo: {dados['grupo']}
 Preço: {dados['preco']}
 MA7: {dados['ma7']}
 MA25: {dados['ma25']}
@@ -291,22 +388,24 @@ Distância da MA7: {dados['distancia_ma7']}
 Subida contínua: {dados['subida_continua']}
 """
 
-    resposta = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1
-    )
-
-    texto = resposta.choices[0].message.content.strip()
-    texto = texto.replace("```json", "").replace("```", "").replace("\n", "").strip()
-
-    inicio = texto.find("{")
-    fim = texto.rfind("}") + 1
-    texto = texto[inicio:fim]
-
     try:
+        resposta = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1
+        )
+
+        texto = resposta.choices[0].message.content.strip()
+        texto = texto.replace("```json", "").replace("```", "").replace("\n", "").strip()
+
+        inicio = texto.find("{")
+        fim = texto.rfind("}") + 1
+        texto = texto[inicio:fim]
+
         analise_json = json.loads(texto)
-    except Exception:
+
+    except Exception as e:
+        print("ERRO_IA:", str(e))
         analise_json = {
             "status": "nao_operar",
             "direcao": "neutro",
@@ -324,6 +423,10 @@ Subida contínua: {dados['subida_continua']}
     }
 
 
+# =========================
+# ROTAS DE ANÁLISE
+# =========================
+
 @app.get("/preco/{symbol}")
 def get_preco(symbol: str):
     symbol = symbol.upper()
@@ -340,6 +443,7 @@ def get_preco(symbol: str):
 
         return {
             "ativo": symbol,
+            "grupo": obter_grupo(symbol),
             "preco": data["price"]
         }
 
@@ -380,7 +484,11 @@ def ordem_preview(symbol: str):
         symbol = symbol.upper()
 
         if symbol not in CONFIG_ATIVOS:
-            return {"ativo": symbol, "pode_operar": False, "motivo": "Ativo não permitido"}
+            return {
+                "ativo": symbol,
+                "pode_operar": False,
+                "motivo": "Ativo não permitido"
+            }
 
         data = gerar_ia(symbol)
 
@@ -393,20 +501,33 @@ def ordem_preview(symbol: str):
         if ia.get("status") != "operar":
             return {
                 "ativo": symbol,
+                "grupo": obter_grupo(symbol),
                 "pode_operar": False,
                 "motivo": "IA não validou entrada",
-                "score": score
+                "score": score,
+                "analise_ia": ia
+            }
+
+        if ia.get("direcao") != "compra":
+            return {
+                "ativo": symbol,
+                "grupo": obter_grupo(symbol),
+                "pode_operar": False,
+                "motivo": "IA não indicou compra",
+                "score": score,
+                "analise_ia": ia
             }
 
         if score < 85:
             return {
                 "ativo": symbol,
+                "grupo": obter_grupo(symbol),
                 "pode_operar": False,
                 "motivo": "Score baixo",
-                "score": score
+                "score": score,
+                "analise_ia": ia
             }
 
-        # 🔥 NOVA CONFIGURAÇÃO
         alvo_percentual = 0.01
         risco_percentual = 0.006
 
@@ -417,19 +538,26 @@ def ordem_preview(symbol: str):
 
         return {
             "ativo": symbol,
+            "grupo": obter_grupo(symbol),
             "pode_operar": True,
             "direcao": "compra",
-            "entrada": round(entrada, 2),
-            "stop": round(stop, 2),
-            "stop_limit": round(stop_limit, 2),
-            "alvo": round(alvo, 2),
+            "entrada": round(entrada, CONFIG_ATIVOS[symbol]["price_decimals"]),
+            "stop": round(stop, CONFIG_ATIVOS[symbol]["price_decimals"]),
+            "stop_limit": round(stop_limit, CONFIG_ATIVOS[symbol]["price_decimals"]),
+            "alvo": round(alvo, CONFIG_ATIVOS[symbol]["price_decimals"]),
             "score": score,
-            "confirmacao_necessaria": True
+            "valor_usdt": VALOR_POR_TRADE_USDT,
+            "confirmacao_necessaria": True,
+            "analise_ia": ia
         }
 
     except Exception as e:
         return {"erro": str(e)}
 
+
+# =========================
+# EXECUÇÃO DIRETA — MANTIDA, MAS NÃO USAR COMO FLUXO PRINCIPAL
+# =========================
 
 @app.post("/executar/{symbol}")
 def executar(
@@ -457,7 +585,6 @@ def executar(
         if not api_key or not secret:
             return {"erro": "API Binance não configurada"}
 
-        # 🔍 VALIDAÇÃO DUPLA (mantido)
         preview_1 = ordem_preview(symbol)
 
         if not preview_1.get("pode_operar"):
@@ -479,14 +606,13 @@ def executar(
                 "preview_atual": preview_2
             }
 
-        if preview_2.get("score", 0) < 60:
+        if preview_2.get("score", 0) < 85:
             return {
                 "status": "bloqueado",
                 "motivo": "Score caiu antes da execução.",
                 "preview": preview_2
             }
 
-        preview = preview_2
         config = CONFIG_ATIVOS[symbol]
         valor_usd = config["valor_usd"]
 
@@ -494,7 +620,6 @@ def executar(
             "X-MBX-APIKEY": api_key
         }
 
-        # 🚀 COMPRA MARKET
         params_compra = {
             "symbol": symbol,
             "side": "BUY",
@@ -525,17 +650,15 @@ def executar(
                 "motivo": "Quantidade executada veio zerada"
             }
 
-        # 🔒 PROTEÇÃO (STOP + ALVO)
         preco_medio = float(compra_json["fills"][0]["price"])
 
-        alvo = preco_medio * 1.01      # +1%
-        stop = preco_medio * 0.994     # -0,6%
+        alvo = preco_medio * 1.01
+        stop = preco_medio * 0.994
         stop_limit = preco_medio * 0.993
 
         qty_oco = executed_qty * 0.995
         qty_oco = arredondar(qty_oco, config["qty_decimals"])
 
-        # 🎯 OCO AUTOMÁTICO
         params_oco = {
             "symbol": symbol,
             "side": "SELL",
@@ -567,10 +690,12 @@ def executar(
         return {
             "status": "executado_com_oco",
             "ativo": symbol,
+            "grupo": obter_grupo(symbol),
             "entrada": preco_medio,
             "alvo": alvo,
             "stop": stop,
             "quantidade": qty_oco,
+            "valor_usdt": valor_usd,
             "compra": compra_json,
             "oco": oco_json
         }
@@ -580,6 +705,8 @@ def executar(
             "status": "erro",
             "erro": str(e)
         }
+
+
 @app.get("/aprovar/{symbol}")
 def aprovar(
     symbol: str,
@@ -587,13 +714,18 @@ def aprovar(
     preco: float = None,
     tempo: int = None
 ):
-
     approval_token = os.getenv("APPROVAL_TOKEN")
 
     if token != approval_token:
         return {"status": "bloqueado", "motivo": "Token inválido"}
 
     return executar(symbol, confirmar="SIM")
+
+
+# =========================
+# TESTES E ALERTAS
+# =========================
+
 @app.get("/teste-botao")
 def teste_botao():
     symbol = "BTCUSDT"
@@ -603,8 +735,9 @@ def teste_botao():
     mensagem = f"""🚨 TESTE COM BOTÃO
 
 Ativo: {symbol}
+Grupo: {obter_grupo(symbol)}
 Preço sinal: {preco_atual}
-"""
+Valor planejado: {VALOR_POR_TRADE_USDT} USDT"""
 
     enviar_telegram(
         mensagem,
@@ -615,8 +748,11 @@ Preço sinal: {preco_atual}
     return {
         "status": "enviado",
         "ativo": symbol,
+        "grupo": obter_grupo(symbol),
         "preco_sinal": preco_atual
     }
+
+
 @app.get("/alerta-teste/{symbol}")
 def alerta_teste(symbol: str):
     symbol = symbol.upper()
@@ -634,31 +770,33 @@ def alerta_teste(symbol: str):
     mensagem = f"""🚨 OPORTUNIDADE DETECTADA
 
 Ativo: {preview['ativo']}
+Grupo: {preview['grupo']}
 Direção: {preview['direcao']}
 Score: {preview['score']}
 Entrada: {preview['entrada']}
 Stop: {preview['stop']}
 Alvo: {preview['alvo']}
+Valor planejado: {preview['valor_usdt']} USDT
 
 ⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
 
     enviar_telegram(
-    mensagem,
-    symbol=symbol,
-    preco=preview["entrada"],
-    tempo=int(time.time())
-)
+        mensagem,
+        symbol=symbol,
+        preco=preview["entrada"],
+        tempo=int(time.time())
+    )
 
     return {
         "status": "alerta_enviado",
         "ativo": symbol,
         "preview": preview
     }
-import threading
 
-ultimos_sinais = {}
-ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 
+# =========================
+# MONITORAMENTO AUTOMÁTICO
+# =========================
 
 def monitorar_mercado():
     while True:
@@ -671,23 +809,27 @@ def monitorar_mercado():
                         continue
 
                 preview = ordem_preview(symbol)
-                
+
                 if preview.get("pode_operar"):
-                    
+
                     registrar_evento("sinal_detectado", {
                         "symbol": symbol,
+                        "grupo": preview.get("grupo"),
                         "score": preview.get("score"),
-                        "entrada": preview.get("entrada")
+                        "entrada": preview.get("entrada"),
+                        "valor_usdt": VALOR_POR_TRADE_USDT
                     })
-                
+
                     mensagem = f"""🚨 OPORTUNIDADE DETECTADA
 
 Ativo: {preview['ativo']}
+Grupo: {preview['grupo']}
 Direção: {preview['direcao']}
 Score: {preview['score']}
 Entrada: {preview['entrada']}
 Stop: {preview['stop']}
 Alvo: {preview['alvo']}
+Valor planejado: {preview['valor_usdt']} USDT
 
 ⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
 
