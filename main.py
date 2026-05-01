@@ -556,33 +556,37 @@ def ordem_preview(symbol: str):
 
         preco = dados.get("preco")
 
+        bloqueios = []
+
+        if dados.get("tendencia") != "alta":
+            bloqueios.append("Tendência não está em alta")
+
+        if dados.get("mercado_lateral") is True:
+            bloqueios.append("Mercado lateral")
+
+        if dados.get("entrada_estendida") is True:
+            bloqueios.append("Entrada estendida")
+
+        if dados.get("espaco_ate_alvo") is False:
+            bloqueios.append("Pouco espaço até resistência/alvo")
+
         if ia.get("status") != "operar":
-            return {
-                "ativo": symbol,
-                "grupo": obter_grupo(symbol),
-                "pode_operar": False,
-                "motivo": "IA não validou entrada",
-                "score": score,
-                "analise_ia": ia
-            }
+            bloqueios.append("IA não validou entrada")
 
         if ia.get("direcao") != "compra":
-            return {
-                "ativo": symbol,
-                "grupo": obter_grupo(symbol),
-                "pode_operar": False,
-                "motivo": "IA não indicou compra",
-                "score": score,
-                "analise_ia": ia
-            }
+            bloqueios.append("IA não indicou compra")
 
         if score < 85:
+            bloqueios.append("Score abaixo de 85")
+
+        if bloqueios:
             return {
                 "ativo": symbol,
                 "grupo": obter_grupo(symbol),
                 "pode_operar": False,
-                "motivo": "Score baixo",
+                "motivo": " | ".join(bloqueios),
                 "score": score,
+                "dados": dados,
                 "analise_ia": ia
             }
 
@@ -606,6 +610,7 @@ def ordem_preview(symbol: str):
             "score": score,
             "valor_usdt": VALOR_POR_TRADE_USDT,
             "confirmacao_necessaria": True,
+            "dados": dados,
             "analise_ia": ia
         }
 
