@@ -380,11 +380,7 @@ def ordem_preview(symbol: str):
         symbol = symbol.upper()
 
         if symbol not in CONFIG_ATIVOS:
-            return {
-                "ativo": symbol,
-                "pode_operar": False,
-                "motivo": "Ativo não permitido"
-            }
+            return {"ativo": symbol, "pode_operar": False, "motivo": "Ativo não permitido"}
 
         data = gerar_ia(symbol)
 
@@ -393,32 +389,26 @@ def ordem_preview(symbol: str):
         score = data.get("score", 0)
 
         preco = dados.get("preco")
-        direcao = ia.get("direcao")
-        status = ia.get("status")
 
-        if status != "operar" or score < 85:
+        if ia.get("status") != "operar":
             return {
                 "ativo": symbol,
                 "pode_operar": False,
-                "motivo": "Score baixo ou IA não validou entrada",
-                "status": status,
-                "direcao": direcao,
+                "motivo": "IA não validou entrada",
                 "score": score
             }
 
-        # Spot simples: só compra. Venda/short fica bloqueado.
-        if direcao != "compra":
+        if score < 85:
             return {
                 "ativo": symbol,
                 "pode_operar": False,
-                "motivo": "Spot assistido só permite compra com OCO de venda. Venda/short exige Futures ou Margin.",
-                "status": status,
-                "direcao": direcao,
+                "motivo": "Score baixo",
                 "score": score
             }
 
-        risco_percentual = 0.01
-        alvo_percentual = 0.02
+        # 🔥 NOVA CONFIGURAÇÃO
+        alvo_percentual = 0.01
+        risco_percentual = 0.006
 
         entrada = preco
         stop = preco * (1 - risco_percentual)
@@ -428,22 +418,17 @@ def ordem_preview(symbol: str):
         return {
             "ativo": symbol,
             "pode_operar": True,
-            "direcao": direcao,
+            "direcao": "compra",
             "entrada": round(entrada, 2),
             "stop": round(stop, 2),
             "stop_limit": round(stop_limit, 2),
             "alvo": round(alvo, 2),
-            "risco_percentual": risco_percentual,
-            "alvo_percentual": alvo_percentual,
             "score": score,
             "confirmacao_necessaria": True
         }
 
     except Exception as e:
-        return {
-            "ativo": symbol.upper(),
-            "erro": str(e)
-        }
+        return {"erro": str(e)}
 
 
 @app.post("/executar/{symbol}")
