@@ -278,6 +278,8 @@ def gerar_analise(symbol):
     data = get_klines(symbol)
 
     closes = [float(c[4]) for c in data]
+    highs = [float(c[2]) for c in data]
+    lows = [float(c[3]) for c in data]
     volumes = [float(c[5]) for c in data]
 
     preco = closes[-1]
@@ -289,12 +291,14 @@ def gerar_analise(symbol):
     rsi = calcular_rsi(closes)
 
     variacao_5 = (closes[-1] - closes[-5]) / closes[-5]
+    variacao_10 = (closes[-1] - closes[-10]) / closes[-10]
 
     distancia_ma7 = (preco - ma7) / ma7
+    distancia_ma25 = (preco - ma25) / ma25
 
     volume_atual = volumes[-1]
     volume_medio = sum(volumes[-10:]) / 10
-    volume_status = "alto" if volume_atual > volume_medio else "normal"
+    volume_status = "alto" if volume_atual > volume_medio * 1.15 else "normal"
 
     ultima = data[-1]
     abertura = float(ultima[1])
@@ -313,6 +317,26 @@ def gerar_analise(symbol):
     ultimos = closes[-4:]
     subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
 
+    range_10 = max(highs[-10:]) - min(lows[-10:])
+    range_percentual = range_10 / preco if preco else 0
+
+    mercado_lateral = range_percentual < 0.006
+
+    entrada_estendida = (
+        variacao_5 > 0.008 or
+        distancia_ma7 > 0.008 or
+        rsi > 65 or
+        subida_continua is True
+    )
+
+    suporte_curto = min(lows[-10:])
+    resistencia_curta = max(highs[-10:])
+
+    distancia_resistencia = (resistencia_curta - preco) / preco
+    distancia_suporte = (preco - suporte_curto) / preco
+
+    espaco_ate_alvo = distancia_resistencia >= 0.006
+
     return {
         "ativo": symbol,
         "grupo": obter_grupo(symbol),
@@ -324,8 +348,17 @@ def gerar_analise(symbol):
         "forca_candle": forca_candle,
         "rsi": round(rsi, 2),
         "variacao_5": round(variacao_5, 4),
+        "variacao_10": round(variacao_10, 4),
         "distancia_ma7": round(distancia_ma7, 4),
-        "subida_continua": subida_continua
+        "distancia_ma25": round(distancia_ma25, 4),
+        "subida_continua": subida_continua,
+        "mercado_lateral": mercado_lateral,
+        "entrada_estendida": entrada_estendida,
+        "suporte_curto": round(suporte_curto, CONFIG_ATIVOS[symbol]["price_decimals"]),
+        "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
+        "distancia_resistencia": round(distancia_resistencia, 4),
+        "distancia_suporte": round(distancia_suporte, 4),
+        "espaco_ate_alvo": espaco_ate_alvo
     }
 
 
