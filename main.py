@@ -126,7 +126,7 @@ def calcular_score(dados, ia):
 
     if dados["tendencia"] == "alta" and ia.get("direcao") == "compra":
         score += 25
-    elif dados["tendencia"] == "baixa" and ia.get("direcao") == "venda":
+    if dados["tendencia"] == "alta" and ia.get("direcao") == "compra":
         score += 25
 
     if dados["volume"] == "alto":
