@@ -227,19 +227,36 @@ def calcular_rsi(closes, periodo=14):
 def calcular_score(dados, ia):
     score = 0
 
-    if dados["tendencia"] == "alta" and ia.get("direcao") == "compra":
-        score += 25
+    if ia.get("status") != "operar":
+        return 0
 
-    if dados["volume"] == "alto":
+    if ia.get("direcao") != "compra":
+        return 0
+
+    if dados["tendencia"] == "alta":
         score += 20
 
-    if dados["forca_candle"] == "forte":
+    if dados["volume"] == "alto":
         score += 15
 
-    if ia.get("status") == "operar":
-        score += 25
+    if dados["forca_candle"] == "forte":
+        score += 10
 
-    if ia.get("direcao") == "compra":
+    if 40 <= dados["rsi"] <= 60:
+        score += 15
+    elif 60 < dados["rsi"] <= 65:
+        score += 5
+
+    if -0.004 <= dados["variacao_5"] <= 0.006:
+        score += 15
+
+    if abs(dados["distancia_ma7"]) <= 0.006:
+        score += 10
+
+    if dados["mercado_lateral"] is False:
+        score += 10
+
+    if dados["entrada_estendida"] is False:
         score += 10
 
     if ia.get("risco") == "baixo":
