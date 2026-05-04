@@ -328,6 +328,11 @@ def gerar_analise(symbol):
 
     mercado_lateral = range_percentual < 0.006
 
+    movimento_fraco = (
+        abs(variacao_5) < 0.002 and
+        abs(variacao_10) < 0.004
+    )
+
     entrada_estendida = (
         variacao_5 > 0.008 or
         distancia_ma7 > 0.008 or
@@ -360,6 +365,7 @@ def gerar_analise(symbol):
         "pullback_valido": pullback_valido,
         "subida_continua": subida_continua,
         "mercado_lateral": mercado_lateral,
+        "movimento_fraco": movimento_fraco,
         "entrada_estendida": entrada_estendida,
         "suporte_curto": round(suporte_curto, CONFIG_ATIVOS[symbol]["price_decimals"]),
         "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
@@ -573,6 +579,9 @@ def ordem_preview(symbol: str):
 
         if dados.get("mercado_lateral") is True:
             bloqueios.append("Mercado lateral")
+
+        if dados.get("movimento_fraco") is True:
+            bloqueios.append("Movimento fraco / sem força suficiente")
 
         if dados.get("entrada_estendida") is True:
             bloqueios.append("Entrada estendida")
