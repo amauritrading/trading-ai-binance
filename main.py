@@ -295,6 +295,12 @@ def gerar_analise(symbol):
 
     distancia_ma7 = (preco - ma7) / ma7
     distancia_ma25 = (preco - ma25) / ma25
+    
+    pullback_valido = (
+        preco <= ma7
+        and preco > ma25
+        and distancia_ma7 >= -0.006
+    )
 
     volume_atual = volumes[-1]
     volume_medio = sum(volumes[-10:]) / 10
@@ -351,6 +357,7 @@ def gerar_analise(symbol):
         "variacao_10": round(variacao_10, 4),
         "distancia_ma7": round(distancia_ma7, 4),
         "distancia_ma25": round(distancia_ma25, 4),
+        "pullback_valido": pullback_valido,
         "subida_continua": subida_continua,
         "mercado_lateral": mercado_lateral,
         "entrada_estendida": entrada_estendida,
