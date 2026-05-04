@@ -447,6 +447,7 @@ Distância MA7: {dados['distancia_ma7']}
 Distância MA25: {dados['distancia_ma25']}
 Subida contínua: {dados['subida_continua']}
 Mercado lateral: {dados['mercado_lateral']}
+Pullback válido: {dados['pullback_valido']}
 Entrada estendida: {dados['entrada_estendida']}
 Suporte curto: {dados['suporte_curto']}
 Resistência curta: {dados['resistencia_curta']}
