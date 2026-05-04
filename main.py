@@ -401,6 +401,7 @@ NÃO OPERAR SE:
 - subida_continua = true
 - variacao_5 > 0.008
 - distancia_ma7 > 0.008
+- pullback_valido = false
 - espaco_ate_alvo = false
 - preço perto demais da resistência
 - movimento já aconteceu antes da entrada
@@ -412,6 +413,7 @@ OPERAR SOMENTE SE:
 - volume alto OU candle forte
 - mercado não lateral
 - entrada não estendida
+- pullback_valido = true
 - existe espaço até o alvo
 - risco de reversão é baixo
 
