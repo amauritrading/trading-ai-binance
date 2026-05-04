@@ -574,6 +574,9 @@ def ordem_preview(symbol: str):
         if dados.get("entrada_estendida") is True:
             bloqueios.append("Entrada estendida")
 
+        if dados.get("pullback_valido") is not True:
+            bloqueios.append("Pullback ainda não confirmado")
+
         if dados.get("espaco_ate_alvo") is False:
             bloqueios.append("Pouco espaço até resistência/alvo")
 
