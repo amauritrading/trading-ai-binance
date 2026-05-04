@@ -592,6 +592,9 @@ def ordem_preview(symbol: str):
         if score < 85:
             bloqueios.append("Score abaixo de 85")
 
+        if dados.get("pullback_valido") is not True:
+            score = max(score - 20, 0)
+
         if bloqueios:
             return {
                 "ativo": symbol,
