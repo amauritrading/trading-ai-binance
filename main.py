@@ -321,40 +321,25 @@ def calcular_score(dados, ia):
     if ia.get("risco") == "baixo":
         score += 5
 
-    # =========================
-# EXAUSTÃO (SUAVE - NÃO TRAVA)
-# =========================
+    if dados.get("rsi", 0) > 70:
+        score -= 6
 
-# RSI alto (movimento já esticado)
-if dados.get("rsi", 0) > 70:
-    score -= 6
+    if dados.get("subida_continua") is True:
+        score -= 8
 
-# Subida contínua (já andou)
-if dados.get("subida_continua") is True:
-    score -= 8
+    if dados.get("entrada_estendida") is True:
+        score -= 10
 
-# Entrada estendida (já existe no sistema)
-if dados.get("entrada_estendida") is True:
-    score -= 10
-
-    # =========================
-    # EDGE INFORMACIONAL (SUAVE)
-    # =========================
-
-    # 1. Pressão de rompimento (ruim para compra)
     if dados.get("pressao_rompimento") == "resistencia":
         score -= 10
 
-    # 2. Rejeição a favor (boa para compra)
     if dados.get("rejeicao") == "compra":
         score += 8
 
-    # 3. Rejeição contra (cuidado)
     if dados.get("rejeicao") == "venda":
         score -= 8
 
     return max(0, min(score, 100))
-
 
 # =========================
 # ANÁLISE TÉCNICA
