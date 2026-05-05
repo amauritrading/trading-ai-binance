@@ -335,7 +335,8 @@ def gerar_analise(symbol):
         raise ValueError("Ativo não permitido.")
 
     data = get_klines(symbol)
-
+    
+    edge = calcular_edge_contexto(data)
     closes = [float(c[4]) for c in data]
     highs = [float(c[2]) for c in data]
     lows = [float(c[3]) for c in data]
@@ -554,7 +555,8 @@ Espaço até alvo: {dados['espaco_ate_alvo']}
         "analise_ia": analise_json,
         "score": score
     }
-
+"pressao_rompimento": edge["pressao_rompimento"],
+"rejeicao": edge["rejeicao"],
 
 # =========================
 # ROTAS DE ANÁLISE
