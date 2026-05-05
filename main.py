@@ -321,6 +321,22 @@ def calcular_score(dados, ia):
     if ia.get("risco") == "baixo":
         score += 5
 
+    # =========================
+# EDGE INFORMACIONAL (SUAVE)
+# =========================
+
+# 1. Pressão de rompimento (ruim para compra)
+if dados.get("pressao_rompimento") == "resistencia":
+    score -= 10
+
+# 2. Rejeição a favor (boa para compra)
+if dados.get("rejeicao") == "compra":
+    score += 8
+
+# 3. Rejeição contra (cuidado)
+if dados.get("rejeicao") == "venda":
+    score -= 8
+
     return min(score, 100)
 
 
