@@ -223,6 +223,65 @@ def calcular_rsi(closes, periodo=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+def calcular_edge_contexto(data):
+    try:
+        closes = [float(c[4]) for c in data]
+        highs = [float(c[2]) for c in data]
+        lows = [float(c[3]) for c in data]
+
+        preco = closes[-1]
+
+        # =========================
+        # 1. PRESSÃO DE ROMPIMENTO
+        # =========================
+        suporte = min(lows[-10:])
+        resistencia = max(highs[-10:])
+
+        toques_resistencia = sum(1 for h in highs[-5:] if abs(h - resistencia) / resistencia < 0.002)
+        toques_suporte = sum(1 for l in lows[-5:] if abs(l - suporte) / suporte < 0.002)
+
+        pressao_rompimento = False
+
+        if toques_resistencia >= 3:
+            pressao_rompimento = "resistencia"
+        elif toques_suporte >= 3:
+            pressao_rompimento = "suporte"
+
+        # =========================
+        # 2. REJEIÇÃO (FORÇA REAL)
+        # =========================
+        ultima = data[-1]
+
+        abertura = float(ultima[1])
+        fechamento = float(ultima[4])
+        maxima = float(ultima[2])
+        minima = float(ultima[3])
+
+        corpo = abs(fechamento - abertura)
+        range_total = maxima - minima
+
+        rejeicao = "neutra"
+
+        if range_total > 0:
+            sombra_superior = maxima - max(abertura, fechamento)
+            sombra_inferior = min(abertura, fechamento) - minima
+
+            if sombra_inferior > corpo * 1.2:
+                rejeicao = "compra"
+            elif sombra_superior > corpo * 1.2:
+                rejeicao = "venda"
+
+        return {
+            "pressao_rompimento": pressao_rompimento,
+            "rejeicao": rejeicao
+        }
+
+    except Exception as e:
+        print("ERRO_EDGE:", str(e))
+        return {
+            "pressao_rompimento": None,
+            "rejeicao": "neutra"
+        }
 
 def calcular_score(dados, ia):
     score = 0
