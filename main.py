@@ -431,7 +431,9 @@ def gerar_analise(symbol):
         "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
         "distancia_resistencia": round(distancia_resistencia, 4),
         "distancia_suporte": round(distancia_suporte, 4),
-        "espaco_ate_alvo": espaco_ate_alvo
+        "espaco_ate_alvo": espaco_ate_alvo,
+        "pressao_rompimento": edge["pressao_rompimento"],
+        "rejeicao": edge["rejeicao"]
     }
 
 
@@ -555,8 +557,6 @@ Espaço até alvo: {dados['espaco_ate_alvo']}
         "analise_ia": analise_json,
         "score": score
     }
-"pressao_rompimento": edge["pressao_rompimento"],
-"rejeicao": edge["rejeicao"],
 
 # =========================
 # ROTAS DE ANÁLISE
