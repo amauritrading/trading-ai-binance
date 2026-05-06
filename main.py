@@ -479,16 +479,15 @@ NÃO OPERAR SE:
 - tendência = baixa
 - mercado_lateral = true
 - entrada_estendida = true
-- RSI > 65
+- RSI > 72
 - RSI < 38
 - candle fraco e volume normal
-- subida_continua = true
-- variacao_5 > 0.008
-- distancia_ma7 > 0.008
+- variacao_5 > 0.012
+- distancia_ma7 > 0.012
 - pullback_valido = false
 - espaco_ate_alvo = false
 - preço perto demais da resistência
-- movimento já aconteceu antes da entrada
+- movimento claramente esgotado antes da entrada
 
 OPERAR SOMENTE SE:
 - tendência = alta
