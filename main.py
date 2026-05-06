@@ -41,26 +41,13 @@ CONFIG_ATIVOS = {
         "price_decimals": 2,
         "grupo": "CORE"
     },
-    "XRPUSDT": {
-        "valor_usd": VALOR_POR_TRADE_USDT,
-        "qty_decimals": 1,
-        "price_decimals": 4,
-        "grupo": "ALT"
-    },
-    "LINKUSDT": {
-        "valor_usd": VALOR_POR_TRADE_USDT,
-        "qty_decimals": 2,
-        "price_decimals": 2,
-        "grupo": "ALT"
-    },
-}
 
 GRUPOS = {
     "CORE": ["BTCUSDT", "ETHUSDT"],
-    "ALT": ["XRPUSDT", "LINKUSDT"]
+    "ALT": []
 }
 
-ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "LINKUSDT"]
+ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT"]
 
 ultimos_sinais = {}
 
