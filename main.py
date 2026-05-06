@@ -491,13 +491,13 @@ NÃO OPERAR SE:
 
 OPERAR SOMENTE SE:
 - tendência = alta
-- preço próximo da MA7
-- RSI entre 40 e 60 preferencialmente
+- preço próximo da MA7 ou em retomada moderada
+- RSI entre 40 e 65 preferencialmente
 - volume alto OU candle forte
 - mercado não lateral
 - entrada não estendida
 - pullback_valido = true
-- existe espaço até o alvo
+- existe espaço real até o alvo de aproximadamente 1%
 - risco de reversão é baixo
 
 REGRA CRÍTICA:
