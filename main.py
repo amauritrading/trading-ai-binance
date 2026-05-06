@@ -411,10 +411,9 @@ def gerar_analise(symbol):
     )
 
     entrada_estendida = (
-        variacao_5 > 0.008 or
-        distancia_ma7 > 0.008 or
-        rsi > 65 or
-        subida_continua is True
+        variacao_5 > 0.012
+        or distancia_ma7 > 0.012
+        or rsi > 72
     )
 
     suporte_curto = min(lows[-10:])
