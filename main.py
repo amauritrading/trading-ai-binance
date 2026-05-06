@@ -40,7 +40,8 @@ CONFIG_ATIVOS = {
         "qty_decimals": 5,
         "price_decimals": 2,
         "grupo": "CORE"
-    },
+    }
+}
 
 GRUPOS = {
     "CORE": ["BTCUSDT", "ETHUSDT"],
