@@ -653,7 +653,13 @@ def ordem_preview(symbol: str):
         if dados.get("pullback_valido") is not True:
             bloqueios.append("Pullback ainda não confirmado")
 
-        if dados.get("espaco_ate_alvo") is False:
+        if (
+            dados.get("espaco_ate_alvo") is False
+            and not (
+                dados.get("tendencia") == "alta"
+                and dados.get("volume") == "alto"
+            )
+         ):
             bloqueios.append("Pouco espaço até resistência/alvo")
 
         if ia.get("status") != "operar":
