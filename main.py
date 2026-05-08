@@ -662,8 +662,8 @@ def ordem_preview(symbol: str):
         if ia.get("direcao") != "compra":
             bloqueios.append("IA não indicou compra")
 
-        if score < 85:
-            bloqueios.append("Score abaixo de 85")
+        if score < 75:
+            bloqueios.append("Score abaixo de 75")
 
         if dados.get("pullback_valido") is not True:
             score = max(score - 20, 0)
