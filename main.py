@@ -410,7 +410,7 @@ def gerar_analise(symbol):
     distancia_resistencia = (resistencia_curta - preco) / preco
     distancia_suporte = (preco - suporte_curto) / preco
 
-    espaco_ate_alvo = distancia_resistencia >= 0.013
+    espaco_ate_alvo = distancia_resistencia >= 0.008
 
     return {
         "ativo": symbol,
