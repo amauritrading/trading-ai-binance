@@ -391,7 +391,7 @@ def gerar_analise(symbol):
     range_10 = max(highs[-10:]) - min(lows[-10:])
     range_percentual = range_10 / preco if preco else 0
 
-    mercado_lateral = range_percentual < 0.006
+    mercado_lateral = range_percentual < 0.003
 
     movimento_fraco = (
         abs(variacao_5) < 0.002 and
