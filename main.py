@@ -40,6 +40,12 @@ CONFIG_ATIVOS = {
         "qty_decimals": 5,
         "price_decimals": 2,
         "grupo": "CORE"
+    },
+    "SOLUSDT": {
+        "valor_usd": VALOR_POR_TRADE_USDT,
+        "qty_decimals": 3,
+        "price_decimals": 2,
+        "grupo": "CORE"
     }
 }
 
