@@ -54,7 +54,7 @@ GRUPOS = {
     "ALT": []
 }
 
-ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT"]
+ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 ultimos_sinais = {}
 
