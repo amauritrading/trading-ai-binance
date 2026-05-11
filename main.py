@@ -50,7 +50,7 @@ CONFIG_ATIVOS = {
 }
 
 GRUPOS = {
-    "CORE": ["BTCUSDT", "ETHUSDT"],
+    "CORE": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
     "ALT": []
 }
 
