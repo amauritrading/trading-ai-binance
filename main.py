@@ -368,9 +368,10 @@ def gerar_analise(symbol):
     distancia_ma25 = (preco - ma25) / ma25
     
     pullback_valido = (
-        preco <= ma7
-        and preco > ma25
-        and distancia_ma7 >= -0.006
+        tendencia == "alta"
+        and preco >= ma25
+        and distancia_ma7 <= 0.006
+        and distancia_ma7 >= -0.008
     )
 
     volume_atual = volumes[-1]
