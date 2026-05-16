@@ -669,12 +669,6 @@ def ordem_preview(symbol: str):
          ):
             bloqueios.append("Pouco espaço até resistência/alvo")
 
-        if ia.get("status") != "operar":
-            bloqueios.append("IA não validou entrada")
-
-        if ia.get("direcao") != "compra":
-            bloqueios.append("IA não indicou compra")
-
         if score < 60:
             bloqueios.append("Score abaixo de 60")
 
