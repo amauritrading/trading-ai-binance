@@ -743,12 +743,6 @@ def diagnostico(symbol: str):
         if dados.get("espaco_ate_alvo") is False:
             bloqueios.append("pouco_espaco_alvo")
 
-        if ia.get("status") != "operar":
-            bloqueios.append("ia_nao_operar")
-
-        if ia.get("direcao") != "compra":
-            bloqueios.append("ia_nao_compra")
-
         if score < 60:
             bloqueios.append("score_baixo")
 
