@@ -280,11 +280,11 @@ def calcular_edge_contexto(data):
 def calcular_score(dados, ia):
     score = 0
 
-    if ia.get("status") != "operar":
-        return 0
+    if ia.get("status") == "operar":
+        score += 15
 
-    if ia.get("direcao") != "compra":
-        return 0
+    if ia.get("direcao") == "compra":
+        score += 10
 
     if dados["tendencia"] == "alta":
         score += 20
