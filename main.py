@@ -719,6 +719,59 @@ def ordem_preview(symbol: str):
     except Exception as e:
         return {"erro": str(e)}
 
+@app.get("/diagnostico/{symbol}")
+def diagnostico(symbol: str):
+    symbol = symbol.upper()
+
+    try:
+        data = gerar_ia(symbol)
+        dados = data.get("dados", {})
+        ia = data.get("analise_ia", {})
+        score = data.get("score", 0)
+
+        bloqueios = []
+
+        if dados.get("tendencia") != "alta":
+            bloqueios.append("tendencia_baixa")
+
+        if dados.get("mercado_lateral") is True:
+            bloqueios.append("mercado_lateral")
+
+        if dados.get("movimento_fraco") is True:
+            bloqueios.append("movimento_fraco")
+
+        if dados.get("entrada_estendida") is True:
+            bloqueios.append("entrada_estendida")
+
+        if dados.get("pullback_valido") is not True:
+            bloqueios.append("pullback_invalido")
+
+        if dados.get("espaco_ate_alvo") is False:
+            bloqueios.append("pouco_espaco_alvo")
+
+        if ia.get("status") != "operar":
+            bloqueios.append("ia_nao_operar")
+
+        if ia.get("direcao") != "compra":
+            bloqueios.append("ia_nao_compra")
+
+        if score < 60:
+            bloqueios.append("score_baixo")
+
+        return {
+            "ativo": symbol,
+            "pode_operar": len(bloqueios) == 0,
+            "score": score,
+            "bloqueios": bloqueios,
+            "dados": dados,
+            "analise_ia": ia
+        }
+
+    except Exception as e:
+        return {
+            "ativo": symbol,
+            "erro": str(e)
+        }
 
 # =========================
 # EXECUÇÃO DIRETA — MANTIDA, MAS NÃO USAR COMO FLUXO PRINCIPAL
