@@ -411,6 +411,22 @@ def gerar_analise(symbol):
         or rsi > 72
     )
 
+     momento_aquecido = (
+         tendencia == "alta"
+         and pullback_valido is True
+         and entrada_estendida is False
+         and movimento_fraco is False
+         and rsi >= 45
+         and rsi <= 68
+         and distancia_ma7 <= 0.006
+         and distancia_ma7 >= -0.004
+         and (
+             volume_status == "alto"
+             or forca_candle == "forte"
+             or edge["rejeicao"] == "compra"
+         )
+      )
+    
     suporte_curto = min(lows[-10:])
     resistencia_curta = max(highs[-10:])
 
@@ -438,6 +454,7 @@ def gerar_analise(symbol):
         "mercado_lateral": mercado_lateral,
         "movimento_fraco": movimento_fraco,
         "entrada_estendida": entrada_estendida,
+        "momento_aquecido": momento_aquecido,
         "suporte_curto": round(suporte_curto, CONFIG_ATIVOS[symbol]["price_decimals"]),
         "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
         "distancia_resistencia": round(distancia_resistencia, 4),
@@ -656,6 +673,9 @@ def ordem_preview(symbol: str):
 
         if dados.get("entrada_estendida") is True:
             bloqueios.append("Entrada estendida")
+
+        if dados.get("momento_aquecido") is not True:
+            bloqueios.append("Momento ainda não aquecido para entrada")
 
         if dados.get("pullback_valido") is not True:
             bloqueios.append("Pullback ainda não confirmado")
