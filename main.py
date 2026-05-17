@@ -411,21 +411,21 @@ def gerar_analise(symbol):
         or rsi > 72
     )
 
-     momento_aquecido = (
-         tendencia == "alta"
-         and pullback_valido is True
-         and entrada_estendida is False
-         and movimento_fraco is False
-         and rsi >= 45
-         and rsi <= 68
-         and distancia_ma7 <= 0.006
-         and distancia_ma7 >= -0.004
-         and (
-             volume_status == "alto"
-             or forca_candle == "forte"
-             or edge["rejeicao"] == "compra"
-         )
-      )
+    momento_aquecido = (
+        tendencia == "alta"
+        and pullback_valido is True
+        and entrada_estendida is False
+        and movimento_fraco is False
+        and rsi >= 45
+        and rsi <= 68
+        and distancia_ma7 <= 0.006
+        and distancia_ma7 >= -0.004
+        and (
+            volume_status == "alto"
+            or forca_candle == "forte"
+            or edge["rejeicao"] == "compra"
+        )
+    )
     
     suporte_curto = min(lows[-10:])
     resistencia_curta = max(highs[-10:])
