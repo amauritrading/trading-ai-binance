@@ -832,7 +832,7 @@ def executar(
                 "preview_atual": preview_2
             }
 
-        if preview_2.get("score", 0) < 85:
+        if preview_2.get("score", 0) < 82:
             return {
                 "status": "bloqueado",
                 "motivo": "Score caiu antes da execução.",
