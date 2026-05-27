@@ -183,8 +183,8 @@ def registrar_evento(tipo, dados):
 # BINANCE DATA
 # =========================
 
-def get_klines(symbol):
-    url = f"{BINANCE_DATA_URL}/api/v3/klines?symbol={symbol}&interval=5m&limit=50"
+def get_klines(symbol, interval="5m", limit=50):
+    url = f"{BINANCE_DATA_URL}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     response = requests.get(url, timeout=10)
     response.raise_for_status()
     return response.json()
