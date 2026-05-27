@@ -482,6 +482,15 @@ def gerar_analise(symbol):
 
     espaco_ate_alvo = distancia_resistencia >= 0.008
 
+        rompimento_forte = (
+        subida_continua is True
+        and volume_status == "alto"
+        and forca_candle == "forte"
+        and edge["rejeicao"] != "venda"
+        and distancia_resistencia >= 0.004
+        and entrada_estendida is True
+    )
+
     return {
         "ativo": symbol,
         "grupo": obter_grupo(symbol),
@@ -501,6 +510,7 @@ def gerar_analise(symbol):
         "mercado_lateral": mercado_lateral,
         "movimento_fraco": movimento_fraco,
         "entrada_estendida": entrada_estendida,
+        "rompimento_forte": rompimento_forte,
         "momento_aquecido": momento_aquecido,
         "suporte_curto": round(suporte_curto, CONFIG_ATIVOS[symbol]["price_decimals"]),
         "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
@@ -737,8 +747,8 @@ def ordem_preview(symbol: str):
         if dados.get("perto_resistencia_4h") is True and not forca_excepcional:
             bloqueios.append("Preço próximo de resistência 4H")
 
-        if dados.get("entrada_estendida") is True:
-            bloqueios.append("Entrada estendida")
+        if dados.get("entrada_estendida") is True and dados.get("rompimento_forte") is not True:
+            bloqueios.append("Entrada estendida sem rompimento forte")
 
         if dados.get("momento_aquecido") is not True:
             bloqueios.append("Momento ainda não aquecido para entrada")
