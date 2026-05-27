@@ -724,7 +724,7 @@ def ordem_preview(symbol: str):
         if dados.get("movimento_fraco") is True:
             bloqueios.append("Movimento fraco / sem força suficiente")
 
-                forca_excepcional = (
+        forca_excepcional = (
             dados.get("volume") == "alto"
             and dados.get("forca_candle") == "forte"
             and dados.get("entrada_estendida") is False
