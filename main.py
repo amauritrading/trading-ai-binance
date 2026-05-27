@@ -394,6 +394,7 @@ def gerar_analise(symbol):
     data = get_klines(symbol)
     
     edge = calcular_edge_contexto(data)
+    contexto_4h = calcular_contexto_4h(symbol)
     closes = [float(c[4]) for c in data]
     highs = [float(c[2]) for c in data]
     lows = [float(c[3]) for c in data]
@@ -506,6 +507,12 @@ def gerar_analise(symbol):
         "distancia_resistencia": round(distancia_resistencia, 4),
         "distancia_suporte": round(distancia_suporte, 4),
         "espaco_ate_alvo": espaco_ate_alvo,
+        "ma7_4h": contexto_4h["ma7_4h"],
+        "ma25_4h": contexto_4h["ma25_4h"],
+        "ma99_4h": contexto_4h["ma99_4h"],
+        "macro_baixista": contexto_4h["macro_baixista"],
+        "perto_resistencia_4h": contexto_4h["perto_resistencia_4h"],
+        "volume_4h_fraco": contexto_4h["volume_4h_fraco"],
         "pressao_rompimento": edge["pressao_rompimento"],
         "rejeicao": edge["rejeicao"]
     }
@@ -716,6 +723,19 @@ def ordem_preview(symbol: str):
 
         if dados.get("movimento_fraco") is True:
             bloqueios.append("Movimento fraco / sem força suficiente")
+
+                forca_excepcional = (
+            dados.get("volume") == "alto"
+            and dados.get("forca_candle") == "forte"
+            and dados.get("entrada_estendida") is False
+            and dados.get("distancia_resistencia", 0) >= 0.007
+        )
+
+        if dados.get("macro_baixista") is True and not forca_excepcional:
+            bloqueios.append("Contexto 4H baixista / repique contra estrutura")
+
+        if dados.get("perto_resistencia_4h") is True and not forca_excepcional:
+            bloqueios.append("Preço próximo de resistência 4H")
 
         if dados.get("entrada_estendida") is True:
             bloqueios.append("Entrada estendida")
