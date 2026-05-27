@@ -276,6 +276,52 @@ def calcular_edge_contexto(data):
             "pressao_rompimento": None,
             "rejeicao": "neutra"
         }
+def calcular_contexto_4h(symbol):
+    try:
+        data_4h = get_klines(symbol, interval="4h", limit=120)
+
+        closes = [float(c[4]) for c in data_4h]
+        volumes = [float(c[5]) for c in data_4h]
+
+        preco = closes[-1]
+        ma7_4h = calcular_ma(closes, 7)
+        ma25_4h = calcular_ma(closes, 25)
+        ma99_4h = calcular_ma(closes, 99)
+
+        volume_atual_4h = volumes[-1]
+        volume_medio_4h = sum(volumes[-10:]) / 10
+
+        macro_baixista = (
+            preco < ma25_4h
+            and ma25_4h < ma99_4h
+        )
+
+        perto_resistencia_4h = (
+            preco < ma25_4h
+            and ((ma25_4h - preco) / preco) < 0.012
+        )
+
+        volume_4h_fraco = volume_atual_4h < volume_medio_4h
+
+        return {
+            "ma7_4h": ma7_4h,
+            "ma25_4h": ma25_4h,
+            "ma99_4h": ma99_4h,
+            "macro_baixista": macro_baixista,
+            "perto_resistencia_4h": perto_resistencia_4h,
+            "volume_4h_fraco": volume_4h_fraco
+        }
+
+    except Exception as e:
+        print("ERRO_CONTEXTO_4H:", str(e))
+        return {
+            "ma7_4h": None,
+            "ma25_4h": None,
+            "ma99_4h": None,
+            "macro_baixista": False,
+            "perto_resistencia_4h": False,
+            "volume_4h_fraco": False
+        }
 
 def calcular_score(dados, ia):
     score = 0
