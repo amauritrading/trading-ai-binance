@@ -482,9 +482,8 @@ def gerar_analise(symbol):
 
     espaco_ate_alvo = distancia_resistencia >= 0.008
 
-        rompimento_forte = (
-        subida_continua is True
-        and volume_status == "alto"
+    rompimento_forte = (
+        volume_status == "alto"
         and forca_candle == "forte"
         and edge["rejeicao"] != "venda"
         and distancia_resistencia >= 0.004
