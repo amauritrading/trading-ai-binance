@@ -485,11 +485,11 @@ def gerar_analise(symbol):
 
     distancia_resistencia = (resistencia_curta - preco) / preco
     distancia_suporte = (preco - suporte_curto) / preco
-    fundo_12 = min(lows[-12:])
-    subida_desde_fundo_12 = (preco - fundo_12) / fundo_12
+    fundo_36 = min(lows[-36:])
+    subida_desde_fundo_36 = (preco - fundo_36) / fundo_36
 
-    entrada_alerta_extensao = subida_desde_fundo_12 > 0.015
-    entrada_tardia_pos_explosao = subida_desde_fundo_12 > 0.020
+    entrada_alerta_extensao = subida_desde_fundo_36 > 0.012
+    entrada_tardia_pos_explosao = subida_desde_fundo_36 > 0.015
 
     espaco_ate_alvo = distancia_resistencia >= 0.008
 
@@ -526,7 +526,7 @@ def gerar_analise(symbol):
         "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
         "distancia_resistencia": round(distancia_resistencia, 4),
         "distancia_suporte": round(distancia_suporte, 4),
-        "subida_desde_fundo_12": round(subida_desde_fundo_12, 4),
+        "subida_desde_fundo_36": round(subida_desde_fundo_36, 4),
         "entrada_alerta_extensao": entrada_alerta_extensao,
         "entrada_tardia_pos_explosao": entrada_tardia_pos_explosao,
         "espaco_ate_alvo": espaco_ate_alvo,
