@@ -370,6 +370,12 @@ def calcular_score(dados, ia):
     if dados.get("entrada_estendida") is True:
         score -= 10
 
+    if dados.get("entrada_alerta_extensao") is True:
+        score -= 8
+
+    if dados.get("entrada_tardia_pos_explosao") is True:
+        score -= 18
+
     if dados.get("pressao_rompimento") == "resistencia":
         score -= 10
 
@@ -479,6 +485,11 @@ def gerar_analise(symbol):
 
     distancia_resistencia = (resistencia_curta - preco) / preco
     distancia_suporte = (preco - suporte_curto) / preco
+    fundo_12 = min(lows[-12:])
+    subida_desde_fundo_12 = (preco - fundo_12) / fundo_12
+
+    entrada_alerta_extensao = subida_desde_fundo_12 > 0.015
+    entrada_tardia_pos_explosao = subida_desde_fundo_12 > 0.020
 
     espaco_ate_alvo = distancia_resistencia >= 0.008
 
@@ -515,6 +526,9 @@ def gerar_analise(symbol):
         "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
         "distancia_resistencia": round(distancia_resistencia, 4),
         "distancia_suporte": round(distancia_suporte, 4),
+        "subida_desde_fundo_12": round(subida_desde_fundo_12, 4),
+        "entrada_alerta_extensao": entrada_alerta_extensao,
+        "entrada_tardia_pos_explosao": entrada_tardia_pos_explosao,
         "espaco_ate_alvo": espaco_ate_alvo,
         "ma7_4h": contexto_4h["ma7_4h"],
         "ma25_4h": contexto_4h["ma25_4h"],
@@ -748,6 +762,9 @@ def ordem_preview(symbol: str):
 
         if dados.get("entrada_estendida") is True and dados.get("rompimento_forte") is not True:
             bloqueios.append("Entrada estendida sem rompimento forte")
+
+        if dados.get("entrada_tardia_pos_explosao") is True:
+            bloqueios.append("Entrada tardia após explosão do movimento")
 
         if dados.get("momento_aquecido") is not True:
             bloqueios.append("Momento ainda não aquecido para entrada")
