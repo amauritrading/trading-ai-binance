@@ -445,7 +445,10 @@ subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
 # Confirmação mínima de retomada:
 # evita comprar enquanto o preço ainda está simplesmente recuando,
 # sem exigir rompimento ou confirmação forte que atrase a entrada.
-retomada_minima = closes[-1] >= closes[-2]
+retomada_minima = (
+    closes[-2] > closes[-3]
+    and closes[-1] >= closes[-2]
+)
 
     range_10 = max(highs[-10:]) - min(lows[-10:])
     range_percentual = range_10 / preco if preco else 0
