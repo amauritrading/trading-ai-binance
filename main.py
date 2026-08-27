@@ -437,7 +437,8 @@ def gerar_analise(symbol):
     if range_total == 0:
         forca_candle = "indefinida"
     else:
-        forca_candle = "forte" if corpo > (range_total * 0.6) else "fraca"
+        candle_alta = fechamento > abertura
+        forca_candle = "forte" if candle_alta and corpo > (range_total * 0.6) else "fraca"
 
 ultimos = closes[-4:]
 subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
