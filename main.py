@@ -461,7 +461,7 @@ retomada_minima = (
     )
 
     entrada_estendida = (
-        variacao_5 > 0.012
+        variacao_5 > 0.008
         or distancia_ma7 > 0.012
         or rsi > 72
     )
