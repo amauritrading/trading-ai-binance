@@ -740,6 +740,8 @@ def ordem_preview(symbol: str):
 
         if dados.get("movimento_fraco") is True:
             bloqueios.append("Movimento fraco / sem força suficiente")
+        if dados.get("subida_continua") is True:
+            bloqueios.append("Entrada tardia: sequência de alta já desenvolvida")
 
         forca_excepcional = (
             dados.get("volume") == "alto"
