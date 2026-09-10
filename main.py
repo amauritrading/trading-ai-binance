@@ -461,11 +461,38 @@ retomada_minima = (
         abs(variacao_10) < 0.004
     )
 
-    entrada_estendida = (
-        variacao_5 > 0.008
-        or distancia_ma7 > 0.012
-        or rsi > 72
-    )
+    # ============================================================
+# BLOQUEIO DE ENTRADA TARDIA
+# Evita comprar depois que boa parte do impulso já aconteceu
+# e o preço está muito próximo da máxima recente.
+# ============================================================
+
+fundo_recente = min(lows[-6:])
+maxima_recente = max(highs[-6:])
+
+impulso_desde_fundo = (
+    (preco - fundo_recente) / fundo_recente
+    if fundo_recente > 0
+    else 0
+)
+
+distancia_maxima_recente = (
+    (maxima_recente - preco) / preco
+    if preco > 0
+    else 0
+)
+
+entrada_tardia = (
+    impulso_desde_fundo >= 0.005
+    and distancia_maxima_recente <= 0.0015
+)
+
+entrada_estendida = (
+    variacao_5 > 0.008
+    or distancia_ma7 > 0.012
+    or rsi > 72
+    or entrada_tardia
+)
 
     momento_aquecido = (
         tendencia == "alta"
