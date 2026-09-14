@@ -1,3 +1,4 @@
+# DEPLOY_MARKER_VERTICAL_20260914
 from fastapi import FastAPI, Query
 import requests
 import os
