@@ -12,240 +12,491 @@ import threading
 
 app = FastAPI()
 
-=========================
-
-CONFIGURAÇÕES GERAIS
-
-=========================
+# =========================
+# CONFIGURAÇÕES GERAIS
+# =========================
 
 BINANCE_API_URL = "https://api.binance.com"
 BINANCE_DATA_URL = "https://data-api.binance.vision"
 
 VALOR_POR_TRADE_USDT = 50
 
+# Parâmetros reais do executor local principal (porta 8001).
+# Mantidos centralizados para evitar divergência entre preview, mensagem e execução.
+ALVO_EXECUTOR_PERCENTUAL = 0.007       # +0,70%
+STOP_EXECUTOR_PERCENTUAL = 0.0055      # -0,55%
+STOP_LIMIT_EXECUTOR_PERCENTUAL = 0.0065  # -0,65%
+
 EXECUTOR_BASE_URL = os.getenv(
-"EXECUTOR_BASE_URL",
-"https://announcer-yippee-election.ngrok-free.dev"
-)
+    "EXECUTOR_BASE_URL",
+    "https://trader-jundiai.ngrok.app"
+).rstrip("/")
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ============================================================
+# PARÂMETROS DE ENTRADA POR ATIVO
+#
+# A lógica-base continua a mesma para os três ativos.
+# O que muda são somente tolerâncias ligadas à volatilidade/ruído
+# e ao padrão de entrada tardia observado no histórico.
+# ============================================================
+
 CONFIG_ATIVOS = {
-"BTCUSDT": {
-"valor_usd": VALOR_POR_TRADE_USDT,
-"qty_decimals": 6,
-"price_decimals": 2,
-"grupo": "CORE"
-},
-"ETHUSDT": {
-"valor_usd": VALOR_POR_TRADE_USDT,
-"qty_decimals": 5,
-"price_decimals": 2,
-"grupo": "CORE"
-},
-"SOLUSDT": {
-"valor_usd": VALOR_POR_TRADE_USDT,
-"qty_decimals": 3,
-"price_decimals": 2,
-"grupo": "CORE"
-}
+    "BTCUSDT": {
+        "valor_usd": VALOR_POR_TRADE_USDT,
+        "qty_decimals": 6,
+        "price_decimals": 2,
+        "grupo": "CORE",
+        "entrada": {
+            "impulso_tardio": 0.0045,
+            "distancia_maxima_tardia": 0.0012,
+            "variacao5_estendida": 0.0065,
+            "distancia_ma7_estendida": 0.0090,
+            "pullback_ma7_min": -0.0060,
+            "pullback_ma7_max": 0.0045,
+            "momento_ma7_min": -0.0030,
+            "momento_ma7_max": 0.0045,
+            "lateral_range_max": 0.0025,
+            "movimento_fraco_var5": 0.0015,
+            "movimento_fraco_var10": 0.0030,
+            "score_var5_min": -0.0030,
+            "score_var5_max": 0.0050,
+            "score_dist_ma7_max": 0.0045
+        }
+    },
+    "ETHUSDT": {
+        "valor_usd": VALOR_POR_TRADE_USDT,
+        "qty_decimals": 5,
+        "price_decimals": 2,
+        "grupo": "CORE",
+        "entrada": {
+            "impulso_tardio": 0.0060,
+            "distancia_maxima_tardia": 0.0015,
+            "variacao5_estendida": 0.0080,
+            "distancia_ma7_estendida": 0.0110,
+            "pullback_ma7_min": -0.0075,
+            "pullback_ma7_max": 0.0055,
+            "momento_ma7_min": -0.0040,
+            "momento_ma7_max": 0.0055,
+            "lateral_range_max": 0.0030,
+            "movimento_fraco_var5": 0.0020,
+            "movimento_fraco_var10": 0.0040,
+            "score_var5_min": -0.0040,
+            "score_var5_max": 0.0065,
+            "score_dist_ma7_max": 0.0055
+        }
+    },
+    "SOLUSDT": {
+        "valor_usd": VALOR_POR_TRADE_USDT,
+        "qty_decimals": 3,
+        "price_decimals": 2,
+        "grupo": "CORE",
+        "entrada": {
+            "impulso_tardio": 0.0060,
+            "distancia_maxima_tardia": 0.0018,
+            "variacao5_estendida": 0.0100,
+            "distancia_ma7_estendida": 0.0130,
+            "pullback_ma7_min": -0.0090,
+            "pullback_ma7_max": 0.0065,
+            "momento_ma7_min": -0.0050,
+            "momento_ma7_max": 0.0065,
+            "lateral_range_max": 0.0040,
+            "movimento_fraco_var5": 0.0025,
+            "movimento_fraco_var10": 0.0050,
+            "score_var5_min": -0.0050,
+            "score_var5_max": 0.0080,
+            "score_dist_ma7_max": 0.0065
+        }
+    }
 }
 
 GRUPOS = {
-"CORE": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
-"ALT": []
+    "CORE": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "ALT": []
 }
 
 ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 ultimos_sinais = {}
 
-=========================
-
-TELEGRAM
-
-=========================
+# =========================
+# TELEGRAM
+# =========================
 
 def enviar_telegram(mensagem, symbol=None, preco=None, tempo=None):
-token = os.getenv("TELEGRAM_TOKEN")
-chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    token = os.getenv("TELEGRAM_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-if not token or not chat_id:
-    print("TELEGRAM_NAO_CONFIGURADO")
-    return
+    if not token or not chat_id:
+        print("TELEGRAM_NAO_CONFIGURADO")
+        return
 
-url = f"https://api.telegram.org/bot{token}/sendMessage"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-reply_markup = None
+    reply_markup = None
 
-if symbol and preco:
-    if tempo is None:
-        tempo = int(time.time())
+    if symbol and preco:
+        if tempo is None:
+            tempo = int(time.time())
 
-    approval_url = (
-        f"{EXECUTOR_BASE_URL}/aprovar/{symbol}"
-        f"?token={os.getenv('APPROVAL_TOKEN')}"
-        f"&preco={preco}"
-        f"&tempo={tempo}"
-    )
+        approval_url = (
+            f"{EXECUTOR_BASE_URL}/aprovar/{symbol}"
+            f"?token={os.getenv('APPROVAL_TOKEN')}"
+            f"&preco={preco}"
+            f"&tempo={tempo}"
+        )
 
-    reply_markup = {
-        "inline_keyboard": [
-            [
-                {"text": "✅ Aprovar compra", "url": approval_url}
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Aprovar compra", "url": approval_url}
+                ]
             ]
-        ]
+        }
+
+    elif symbol:
+        approval_url = (
+            f"{EXECUTOR_BASE_URL}/aprovar/{symbol}"
+            f"?token={os.getenv('APPROVAL_TOKEN')}"
+        )
+
+        reply_markup = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Aprovar compra", "url": approval_url}
+                ]
+            ]
+        }
+
+    payload = {
+        "chat_id": chat_id,
+        "text": mensagem
     }
 
-elif symbol:
-    approval_url = (
-        f"{EXECUTOR_BASE_URL}/aprovar/{symbol}"
-        f"?token={os.getenv('APPROVAL_TOKEN')}"
-    )
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
 
-    reply_markup = {
-        "inline_keyboard": [
-            [
-                {"text": "✅ Aprovar compra", "url": approval_url}
-            ]
-        ]
-    }
+    try:
+        resposta = requests.post(url, json=payload, timeout=10)
+        print("TELEGRAM_STATUS:", resposta.status_code)
+        print("TELEGRAM_RESPOSTA:", resposta.text)
+    except Exception as e:
+        print("ERRO_TELEGRAM:", str(e))
 
-payload = {
-    "chat_id": chat_id,
-    "text": mensagem
-}
-
-if reply_markup:
-    payload["reply_markup"] = reply_markup
-
-try:
-    resposta = requests.post(url, json=payload, timeout=10)
-    print("TELEGRAM_STATUS:", resposta.status_code)
-    print("TELEGRAM_RESPOSTA:", resposta.text)
-except Exception as e:
-    print("ERRO_TELEGRAM:", str(e))
 
 @app.get("/teste-telegram")
 def teste_telegram():
-enviar_telegram("🚀 Teste de mensagem do sistema Railway!")
-return {"status": "mensagem enviada"}
+    enviar_telegram("🚀 Teste de mensagem do sistema Railway!")
+    return {"status": "mensagem enviada"}
 
-=========================
 
-ROTAS BASE
-
-=========================
+# =========================
+# ROTAS BASE
+# =========================
 
 @app.get("/")
 def home():
-return {
-"status": "online",
-"sistema": "trading-ai",
-"ativos_monitorados": ATIVOS_MONITORADOS,
-"valor_por_trade_usdt": VALOR_POR_TRADE_USDT
-}
+    return {
+        "status": "online",
+        "sistema": "trading-ai",
+        "ativos_monitorados": ATIVOS_MONITORADOS,
+        "valor_por_trade_usdt": VALOR_POR_TRADE_USDT
+    }
 
-=========================
 
-UTILITÁRIOS
-
-=========================
+# =========================
+# UTILITÁRIOS
+# =========================
 
 def obter_grupo(symbol):
-symbol = symbol.upper()
-return CONFIG_ATIVOS.get(symbol, {}).get("grupo")
+    symbol = symbol.upper()
+    return CONFIG_ATIVOS.get(symbol, {}).get("grupo")
+
 
 def assinar_params(params: dict, secret: str):
-query = urlencode(params)
-signature = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
-return f"{query}&signature={signature}"
+    query = urlencode(params)
+    signature = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+    return f"{query}&signature={signature}"
+
 
 def arredondar(valor, casas):
-quant = Decimal("1") / (Decimal("10") ** casas)
-return str(Decimal(str(valor)).quantize(quant, rounding=ROUND_DOWN))
+    quant = Decimal("1") / (Decimal("10") ** casas)
+    return str(Decimal(str(valor)).quantize(quant, rounding=ROUND_DOWN))
+
 
 def registrar_evento(tipo, dados):
-try:
-evento = {
-"tipo": tipo,
-"timestamp": int(time.time()),
-**dados
-}
+    try:
+        evento = {
+            "tipo": tipo,
+            "timestamp": int(time.time()),
+            **dados
+        }
 
-    with open("trades_log.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps(evento, ensure_ascii=False) + "\n")
+        with open("trades_log.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(evento, ensure_ascii=False) + "\n")
 
-except Exception as e:
-    print("ERRO_LOG:", str(e))
+    except Exception as e:
+        print("ERRO_LOG:", str(e))
 
-=========================
 
-BINANCE DATA
-
-=========================
+# =========================
+# BINANCE DATA
+# =========================
 
 def get_klines(symbol, interval="5m", limit=50):
-url = f"{BINANCE_DATA_URL}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-response = requests.get(url, timeout=10)
-response.raise_for_status()
-return response.json()
+    url = f"{BINANCE_DATA_URL}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    return response.json()
+
 
 def calcular_ma(closes, periodo):
-return sum(closes[-periodo:]) / periodo
+    return sum(closes[-periodo:]) / periodo
+
 
 def calcular_rsi(closes, periodo=14):
-ganhos = []
-perdas = []
+    ganhos = []
+    perdas = []
 
-for i in range(1, len(closes)):
-    diff = closes[i] - closes[i - 1]
-    if diff > 0:
-        ganhos.append(diff)
-        perdas.append(0)
-    else:
-        ganhos.append(0)
-        perdas.append(abs(diff))
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        if diff > 0:
+            ganhos.append(diff)
+            perdas.append(0)
+        else:
+            ganhos.append(0)
+            perdas.append(abs(diff))
 
-media_ganhos = sum(ganhos[-periodo:]) / periodo
-media_perdas = sum(perdas[-periodo:]) / periodo
+    media_ganhos = sum(ganhos[-periodo:]) / periodo
+    media_perdas = sum(perdas[-periodo:]) / periodo
 
-if media_perdas == 0:
-    return 100
+    if media_perdas == 0:
+        return 100
 
-rs = media_ganhos / media_perdas
-rsi = 100 - (100 / (1 + rs))
-return rsi
+    rs = media_ganhos / media_perdas
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
 def calcular_edge_contexto(data):
-try:
-closes = [float(c[4]) for c in data]
-highs = [float(c[2]) for c in data]
-lows = [float(c[3]) for c in data]
+    try:
+        closes = [float(c[4]) for c in data]
+        highs = [float(c[2]) for c in data]
+        lows = [float(c[3]) for c in data]
+
+        preco = closes[-1]
+
+        # =========================
+        # 1. PRESSÃO DE ROMPIMENTO
+        # =========================
+        suporte = min(lows[-10:])
+        resistencia = max(highs[-10:])
+
+        toques_resistencia = sum(1 for h in highs[-5:] if abs(h - resistencia) / resistencia < 0.002)
+        toques_suporte = sum(1 for l in lows[-5:] if abs(l - suporte) / suporte < 0.002)
+
+        pressao_rompimento = False
+
+        if toques_resistencia >= 3:
+            pressao_rompimento = "resistencia"
+        elif toques_suporte >= 3:
+            pressao_rompimento = "suporte"
+
+        # =========================
+        # 2. REJEIÇÃO (FORÇA REAL)
+        # =========================
+        ultima = data[-1]
+
+        abertura = float(ultima[1])
+        fechamento = float(ultima[4])
+        maxima = float(ultima[2])
+        minima = float(ultima[3])
+
+        corpo = abs(fechamento - abertura)
+        range_total = maxima - minima
+
+        rejeicao = "neutra"
+
+        if range_total > 0:
+            sombra_superior = maxima - max(abertura, fechamento)
+            sombra_inferior = min(abertura, fechamento) - minima
+
+            if sombra_inferior > corpo * 1.2:
+                rejeicao = "compra"
+            elif sombra_superior > corpo * 1.2:
+                rejeicao = "venda"
+
+        return {
+            "pressao_rompimento": pressao_rompimento,
+            "rejeicao": rejeicao
+        }
+
+    except Exception as e:
+        print("ERRO_EDGE:", str(e))
+        return {
+            "pressao_rompimento": None,
+            "rejeicao": "neutra"
+        }
+def calcular_contexto_4h(symbol):
+    try:
+        data_4h = get_klines(symbol, interval="4h", limit=120)
+
+        closes = [float(c[4]) for c in data_4h]
+        volumes = [float(c[5]) for c in data_4h]
+
+        preco = closes[-1]
+        ma7_4h = calcular_ma(closes, 7)
+        ma25_4h = calcular_ma(closes, 25)
+        ma99_4h = calcular_ma(closes, 99)
+
+        volume_atual_4h = volumes[-1]
+        volume_medio_4h = sum(volumes[-10:]) / 10
+
+        macro_baixista = (
+            preco < ma25_4h
+            and ma25_4h < ma99_4h
+        )
+
+        perto_resistencia_4h = (
+            preco < ma25_4h
+            and ((ma25_4h - preco) / preco) < 0.012
+        )
+
+        volume_4h_fraco = volume_atual_4h < volume_medio_4h
+
+        return {
+            "ma7_4h": ma7_4h,
+            "ma25_4h": ma25_4h,
+            "ma99_4h": ma99_4h,
+            "macro_baixista": macro_baixista,
+            "perto_resistencia_4h": perto_resistencia_4h,
+            "volume_4h_fraco": volume_4h_fraco
+        }
+
+    except Exception as e:
+        print("ERRO_CONTEXTO_4H:", str(e))
+        return {
+            "ma7_4h": None,
+            "ma25_4h": None,
+            "ma99_4h": None,
+            "macro_baixista": False,
+            "perto_resistencia_4h": False,
+            "volume_4h_fraco": False
+        }
+
+def calcular_score(dados, ia):
+    score = 0
+
+    symbol = dados.get("ativo", "")
+    config_entrada = CONFIG_ATIVOS.get(symbol, {}).get("entrada", {})
+
+    if ia.get("status") == "operar":
+        score += 15
+
+    if ia.get("direcao") == "compra":
+        score += 10
+
+    if dados["tendencia"] == "alta":
+        score += 20
+
+    if dados["volume"] == "alto":
+        score += 15
+
+    if dados["forca_candle"] == "forte":
+        score += 10
+
+    if 40 <= dados["rsi"] <= 60:
+        score += 15
+    elif 60 < dados["rsi"] <= 65:
+        score += 5
+
+    score_var5_min = config_entrada.get("score_var5_min", -0.004)
+    score_var5_max = config_entrada.get("score_var5_max", 0.006)
+
+    if score_var5_min <= dados["variacao_5"] <= score_var5_max:
+        score += 15
+
+    score_dist_ma7_max = config_entrada.get("score_dist_ma7_max", 0.006)
+
+    if abs(dados["distancia_ma7"]) <= score_dist_ma7_max:
+        score += 10
+
+    if dados["mercado_lateral"] is False:
+        score += 10
+
+    if dados["entrada_estendida"] is False:
+        score += 10
+
+    if ia.get("risco") == "baixo":
+        score += 5
+
+    if dados.get("rsi", 0) > 70:
+        score -= 6
+
+    if dados.get("subida_continua") is True:
+        score -= 8
+
+    if dados.get("entrada_estendida") is True:
+        score -= 10
+
+    if dados.get("pressao_rompimento") == "resistencia":
+        score -= 10
+
+    if dados.get("rejeicao") == "compra":
+        score += 8
+
+    if dados.get("rejeicao") == "venda":
+        score -= 8
+
+    return max(0, min(score, 100))
+
+# =========================
+# ANÁLISE TÉCNICA
+# =========================
+
+def gerar_analise(symbol):
+    symbol = symbol.upper()
+
+    if symbol not in CONFIG_ATIVOS:
+        raise ValueError("Ativo não permitido.")
+
+    config = CONFIG_ATIVOS[symbol]
+    p = config["entrada"]
+
+    data = get_klines(symbol)
+    edge = calcular_edge_contexto(data)
+    contexto_4h = calcular_contexto_4h(symbol)
+
+    closes = [float(c[4]) for c in data]
+    highs = [float(c[2]) for c in data]
+    lows = [float(c[3]) for c in data]
+    volumes = [float(c[5]) for c in data]
 
     preco = closes[-1]
+    ma7 = calcular_ma(closes, 7)
+    ma25 = calcular_ma(closes, 25)
 
-    # =========================
-    # 1. PRESSÃO DE ROMPIMENTO
-    # =========================
-    suporte = min(lows[-10:])
-    resistencia = max(highs[-10:])
+    tendencia = "alta" if ma7 > ma25 else "baixa"
+    rsi = calcular_rsi(closes)
 
-    toques_resistencia = sum(1 for h in highs[-5:] if abs(h - resistencia) / resistencia < 0.002)
-    toques_suporte = sum(1 for l in lows[-5:] if abs(l - suporte) / suporte < 0.002)
+    variacao_5 = (closes[-1] - closes[-5]) / closes[-5]
+    variacao_10 = (closes[-1] - closes[-10]) / closes[-10]
 
-    pressao_rompimento = False
+    distancia_ma7 = (preco - ma7) / ma7
+    distancia_ma25 = (preco - ma25) / ma25
 
-    if toques_resistencia >= 3:
-        pressao_rompimento = "resistencia"
-    elif toques_suporte >= 3:
-        pressao_rompimento = "suporte"
+    pullback_valido = (
+        tendencia == "alta"
+        and preco >= ma25
+        and distancia_ma7 <= p["pullback_ma7_max"]
+        and distancia_ma7 >= p["pullback_ma7_min"]
+    )
 
-    # =========================
-    # 2. REJEIÇÃO (FORÇA REAL)
-    # =========================
+    volume_atual = volumes[-1]
+    volume_medio = sum(volumes[-10:]) / 10
+    volume_status = "alto" if volume_atual > volume_medio * 1.15 else "normal"
+
     ultima = data[-1]
-
     abertura = float(ultima[1])
     fechamento = float(ultima[4])
     maxima = float(ultima[2])
@@ -254,404 +505,210 @@ lows = [float(c[3]) for c in data]
     corpo = abs(fechamento - abertura)
     range_total = maxima - minima
 
-    rejeicao = "neutra"
+    if range_total == 0:
+        forca_candle = "indefinida"
+    else:
+        candle_alta = fechamento > abertura
+        forca_candle = (
+            "forte"
+            if candle_alta and corpo > (range_total * 0.6)
+            else "fraca"
+        )
 
-    if range_total > 0:
-        sombra_superior = maxima - max(abertura, fechamento)
-        sombra_inferior = min(abertura, fechamento) - minima
+    # Bloqueio já existente: quatro fechamentos consecutivos crescentes.
+    ultimos = closes[-4:]
+    subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
 
-        if sombra_inferior > corpo * 1.2:
-            rejeicao = "compra"
-        elif sombra_superior > corpo * 1.2:
-            rejeicao = "venda"
-
-    return {
-        "pressao_rompimento": pressao_rompimento,
-        "rejeicao": rejeicao
-    }
-
-except Exception as e:
-    print("ERRO_EDGE:", str(e))
-    return {
-        "pressao_rompimento": None,
-        "rejeicao": "neutra"
-    }
-
-def calcular_contexto_4h(symbol):
-try:
-data_4h = get_klines(symbol, interval="4h", limit=120)
-
-    closes = [float(c[4]) for c in data_4h]
-    volumes = [float(c[5]) for c in data_4h]
-
-    preco = closes[-1]
-    ma7_4h = calcular_ma(closes, 7)
-    ma25_4h = calcular_ma(closes, 25)
-    ma99_4h = calcular_ma(closes, 99)
-
-    volume_atual_4h = volumes[-1]
-    volume_medio_4h = sum(volumes[-10:]) / 10
-
-    macro_baixista = (
-        preco < ma25_4h
-        and ma25_4h < ma99_4h
+    # Mantida como informação diagnóstica.
+    # Não virou bloqueio duro nesta versão para não atrasar entradas.
+    retomada_minima = (
+        closes[-2] > closes[-3]
+        and closes[-1] >= closes[-2]
     )
 
-    perto_resistencia_4h = (
-        preco < ma25_4h
-        and ((ma25_4h - preco) / preco) < 0.012
+    range_10 = max(highs[-10:]) - min(lows[-10:])
+    range_percentual = range_10 / preco if preco else 0
+
+    mercado_lateral = range_percentual < p["lateral_range_max"]
+
+    movimento_fraco = (
+        abs(variacao_5) < p["movimento_fraco_var5"]
+        and abs(variacao_10) < p["movimento_fraco_var10"]
     )
 
-    volume_4h_fraco = volume_atual_4h < volume_medio_4h
+    # ============================================================
+    # BLOQUEIO DE ENTRADA TARDIA ESPECÍFICO POR ATIVO
+    # ============================================================
 
-    return {
-        "ma7_4h": ma7_4h,
-        "ma25_4h": ma25_4h,
-        "ma99_4h": ma99_4h,
-        "macro_baixista": macro_baixista,
-        "perto_resistencia_4h": perto_resistencia_4h,
-        "volume_4h_fraco": volume_4h_fraco
-    }
+    fundo_recente = min(lows[-6:])
+    maxima_recente = max(highs[-6:])
 
-except Exception as e:
-    print("ERRO_CONTEXTO_4H:", str(e))
-    return {
-        "ma7_4h": None,
-        "ma25_4h": None,
-        "ma99_4h": None,
-        "macro_baixista": False,
-        "perto_resistencia_4h": False,
-        "volume_4h_fraco": False
-    }
+    impulso_desde_fundo = (
+        (preco - fundo_recente) / fundo_recente
+        if fundo_recente > 0
+        else 0
+    )
 
-def calcular_score(dados, ia):
-score = 0
+    distancia_maxima_recente = (
+        (maxima_recente - preco) / preco
+        if preco > 0
+        else 0
+    )
 
-if ia.get("status") == "operar":
-    score += 15
+    entrada_tardia = (
+        impulso_desde_fundo >= p["impulso_tardio"]
+        and distancia_maxima_recente <= p["distancia_maxima_tardia"]
+    )
 
-if ia.get("direcao") == "compra":
-    score += 10
+    entrada_estendida = (
+        variacao_5 > p["variacao5_estendida"]
+        or distancia_ma7 > p["distancia_ma7_estendida"]
+        or rsi > 72
+        or entrada_tardia
+    )
 
-if dados["tendencia"] == "alta":
-    score += 20
+    momento_aquecido = (
+        tendencia == "alta"
+        and pullback_valido is True
+        and entrada_estendida is False
+        and movimento_fraco is False
+        and rsi >= 45
+        and rsi <= 68
+        and distancia_ma7 <= p["momento_ma7_max"]
+        and distancia_ma7 >= p["momento_ma7_min"]
+        and (
+            volume_status == "alto"
+            or forca_candle == "forte"
+            or edge["rejeicao"] == "compra"
+        )
+    )
 
-if dados["volume"] == "alto":
-    score += 15
+    suporte_curto = min(lows[-10:])
+    resistencia_curta = max(highs[-10:])
 
-if dados["forca_candle"] == "forte":
-    score += 10
+    distancia_resistencia = (resistencia_curta - preco) / preco
+    distancia_suporte = (preco - suporte_curto) / preco
 
-if 40 <= dados["rsi"] <= 60:
-    score += 15
-elif 60 < dados["rsi"] <= 65:
-    score += 5
+    # Mantido em 0,5% nesta versão para não reduzir drasticamente
+    # a frequência de sinais. O alvo real do executor é +0,70%.
+    espaco_ate_alvo = distancia_resistencia >= 0.005
 
-if -0.004 <= dados["variacao_5"] <= 0.006:
-    score += 15
-
-if abs(dados["distancia_ma7"]) <= 0.006:
-    score += 10
-
-if dados["mercado_lateral"] is False:
-    score += 10
-
-if dados["entrada_estendida"] is False:
-    score += 10
-
-if ia.get("risco") == "baixo":
-    score += 5
-
-if dados.get("rsi", 0) > 70:
-    score -= 6
-
-if dados.get("subida_continua") is True:
-    score -= 8
-
-if dados.get("entrada_estendida") is True:
-    score -= 10
-
-if dados.get("pressao_rompimento") == "resistencia":
-    score -= 10
-
-if dados.get("rejeicao") == "compra":
-    score += 8
-
-if dados.get("rejeicao") == "venda":
-    score -= 8
-
-return max(0, min(score, 100))
-
-=========================
-
-ANÁLISE TÉCNICA
-
-=========================
-
-def gerar_analise(symbol):
-symbol = symbol.upper()
-
-if symbol not in CONFIG_ATIVOS:
-    raise ValueError("Ativo não permitido.")
-
-data = get_klines(symbol)
-
-edge = calcular_edge_contexto(data)
-contexto_4h = calcular_contexto_4h(symbol)
-closes = [float(c[4]) for c in data]
-highs = [float(c[2]) for c in data]
-lows = [float(c[3]) for c in data]
-volumes = [float(c[5]) for c in data]
-
-preco = closes[-1]
-ma7 = calcular_ma(closes, 7)
-ma25 = calcular_ma(closes, 25)
-
-tendencia = "alta" if ma7 > ma25 else "baixa"
-
-rsi = calcular_rsi(closes)
-
-variacao_5 = (closes[-1] - closes[-5]) / closes[-5]
-variacao_10 = (closes[-1] - closes[-10]) / closes[-10]
-
-distancia_ma7 = (preco - ma7) / ma7
-distancia_ma25 = (preco - ma25) / ma25
-
-pullback_valido = (
-    tendencia == "alta"
-    and preco >= ma25
-    and distancia_ma7 <= 0.006
-    and distancia_ma7 >= -0.008
-)
-
-volume_atual = volumes[-1]
-volume_medio = sum(volumes[-10:]) / 10
-volume_status = "alto" if volume_atual > volume_medio * 1.15 else "normal"
-
-ultima = data[-1]
-abertura = float(ultima[1])
-fechamento = float(ultima[4])
-maxima = float(ultima[2])
-minima = float(ultima[3])
-
-corpo = abs(fechamento - abertura)
-range_total = maxima - minima
-
-if range_total == 0:
-    forca_candle = "indefinida"
-else:
-    candle_alta = fechamento > abertura
-    forca_candle = "forte" if candle_alta and corpo > (range_total * 0.6) else "fraca"
-
-ultimos = closes[-4:]
-subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
-
-Confirmação mínima de retomada:
-
-evita comprar enquanto o preço ainda está simplesmente recuando,
-
-sem exigir rompimento ou confirmação forte que atrase a entrada.
-
-retomada_minima = (
-closes[-2] > closes[-3]
-and closes[-1] >= closes[-2]
-)
-
-range_10 = max(highs[-10:]) - min(lows[-10:])
-range_percentual = range_10 / preco if preco else 0
-
-mercado_lateral = range_percentual < 0.003
-
-movimento_fraco = (
-    abs(variacao_5) < 0.002 and
-    abs(variacao_10) < 0.004
-)
-
-# ============================================================
-
-BLOQUEIO DE ENTRADA TARDIA
-
-Evita comprar depois que boa parte do impulso já aconteceu
-
-e o preço está muito próximo da máxima recente.
-
-============================================================
-
-fundo_recente = min(lows[-6:])
-maxima_recente = max(highs[-6:])
-
-impulso_desde_fundo = (
-(preco - fundo_recente) / fundo_recente
-if fundo_recente > 0
-else 0
-)
-
-distancia_maxima_recente = (
-(maxima_recente - preco) / preco
-if preco > 0
-else 0
-)
-
-entrada_tardia = (
-impulso_desde_fundo >= 0.005
-and distancia_maxima_recente <= 0.0015
-)
-
-entrada_estendida = (
-variacao_5 > 0.008
-or distancia_ma7 > 0.012
-or rsi > 72
-or entrada_tardia
-)
-
-momento_aquecido = (
-    tendencia == "alta"
-    and pullback_valido is True
-    and entrada_estendida is False
-    and movimento_fraco is False
-    and rsi >= 45
-    and rsi <= 68
-    and distancia_ma7 <= 0.006
-    and distancia_ma7 >= -0.004
-    and (
+    rompimento_forte = (
         volume_status == "alto"
-        or forca_candle == "forte"
-        or edge["rejeicao"] == "compra"
+        and forca_candle == "forte"
+        and edge["rejeicao"] != "venda"
+        and distancia_resistencia >= 0.004
+        and entrada_estendida is True
     )
-)
 
-suporte_curto = min(lows[-10:])
-resistencia_curta = max(highs[-10:])
+    return {
+        "ativo": symbol,
+        "grupo": obter_grupo(symbol),
+        "preco": preco,
+        "ma7": ma7,
+        "ma25": ma25,
+        "tendencia": tendencia,
+        "volume": volume_status,
+        "forca_candle": forca_candle,
+        "rsi": round(rsi, 2),
+        "variacao_5": round(variacao_5, 4),
+        "variacao_10": round(variacao_10, 4),
+        "distancia_ma7": round(distancia_ma7, 4),
+        "distancia_ma25": round(distancia_ma25, 4),
+        "pullback_valido": pullback_valido,
+        "subida_continua": subida_continua,
+        "retomada_minima": retomada_minima,
+        "mercado_lateral": mercado_lateral,
+        "movimento_fraco": movimento_fraco,
+        "entrada_tardia": entrada_tardia,
+        "entrada_estendida": entrada_estendida,
+        "impulso_desde_fundo": round(impulso_desde_fundo, 4),
+        "distancia_maxima_recente": round(distancia_maxima_recente, 4),
+        "rompimento_forte": rompimento_forte,
+        "momento_aquecido": momento_aquecido,
+        "suporte_curto": round(
+            suporte_curto,
+            CONFIG_ATIVOS[symbol]["price_decimals"]
+        ),
+        "resistencia_curta": round(
+            resistencia_curta,
+            CONFIG_ATIVOS[symbol]["price_decimals"]
+        ),
+        "distancia_resistencia": round(distancia_resistencia, 4),
+        "distancia_suporte": round(distancia_suporte, 4),
+        "espaco_ate_alvo": espaco_ate_alvo,
+        "ma7_4h": contexto_4h["ma7_4h"],
+        "ma25_4h": contexto_4h["ma25_4h"],
+        "ma99_4h": contexto_4h["ma99_4h"],
+        "macro_baixista": contexto_4h["macro_baixista"],
+        "perto_resistencia_4h": contexto_4h["perto_resistencia_4h"],
+        "volume_4h_fraco": contexto_4h["volume_4h_fraco"],
+        "pressao_rompimento": edge["pressao_rompimento"],
+        "rejeicao": edge["rejeicao"],
+        "parametros_entrada": {
+            "impulso_tardio": p["impulso_tardio"],
+            "distancia_maxima_tardia": p["distancia_maxima_tardia"],
+            "variacao5_estendida": p["variacao5_estendida"],
+            "distancia_ma7_estendida": p["distancia_ma7_estendida"],
+            "pullback_ma7_min": p["pullback_ma7_min"],
+            "pullback_ma7_max": p["pullback_ma7_max"],
+            "momento_ma7_min": p["momento_ma7_min"],
+            "momento_ma7_max": p["momento_ma7_max"]
+        }
+    }
 
-distancia_resistencia = (resistencia_curta - preco) / preco
-distancia_suporte = (preco - suporte_curto) / preco
-
-espaco_ate_alvo = distancia_resistencia >= 0.005
-
-rompimento_forte = (
-    volume_status == "alto"
-    and forca_candle == "forte"
-    and edge["rejeicao"] != "venda"
-    and distancia_resistencia >= 0.004
-    and entrada_estendida is True
-)
-
-return {
-    "ativo": symbol,
-    "grupo": obter_grupo(symbol),
-    "preco": preco,
-    "ma7": ma7,
-    "ma25": ma25,
-    "tendencia": tendencia,
-    "volume": volume_status,
-    "forca_candle": forca_candle,
-    "rsi": round(rsi, 2),
-    "variacao_5": round(variacao_5, 4),
-    "variacao_10": round(variacao_10, 4),
-    "distancia_ma7": round(distancia_ma7, 4),
-    "distancia_ma25": round(distancia_ma25, 4),
-    "pullback_valido": pullback_valido,
-    "subida_continua": subida_continua,
-    "mercado_lateral": mercado_lateral,
-    "movimento_fraco": movimento_fraco,
-    "entrada_estendida": entrada_estendida,
-    "rompimento_forte": rompimento_forte,
-    "momento_aquecido": momento_aquecido,
-    "suporte_curto": round(suporte_curto, CONFIG_ATIVOS[symbol]["price_decimals"]),
-    "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
-    "distancia_resistencia": round(distancia_resistencia, 4),
-    "distancia_suporte": round(distancia_suporte, 4),
-    "espaco_ate_alvo": espaco_ate_alvo,
-    "ma7_4h": contexto_4h["ma7_4h"],
-    "ma25_4h": contexto_4h["ma25_4h"],
-    "ma99_4h": contexto_4h["ma99_4h"],
-    "macro_baixista": contexto_4h["macro_baixista"],
-    "perto_resistencia_4h": contexto_4h["perto_resistencia_4h"],
-    "volume_4h_fraco": contexto_4h["volume_4h_fraco"],
-    "pressao_rompimento": edge["pressao_rompimento"],
-    "rejeicao": edge["rejeicao"]
-}
-
-=========================
-
-IA
-
-=========================
+# =========================
+# IA
+# =========================
 
 def gerar_ia(symbol):
-dados = gerar_analise(symbol)
+    dados = gerar_analise(symbol)
 
-prompt = f"""
-
+    prompt = f"""
 Você é um analista quantitativo profissional de trading em criptomoedas spot, curto prazo.
 
 OBJETIVO:
-Validar apenas entradas com chance real de movimento de curto prazo para alvo aproximado de +1% e stop de -0,6%.
+Validar apenas entradas com chance real de movimento de curto prazo para
+alvo aproximado de +0,70%, stop trigger de -0,55% e stop limit de -0,65%.
 
 CONTEXTO:
-
-Dinheiro real.
-
-Entrada manual via Telegram.
-
-Execução por executor local.
-
-Máximo 2 trades simultâneos.
-
-CORE = BTCUSDT, ETHUSDT.
-
-ALT = XRPUSDT, LINKUSDT.
-
-O sistema deve priorizar qualidade, não quantidade.
+- Dinheiro real.
+- Entrada manual via Telegram.
+- Execução principal no executor local.
+- Máximo 2 trades simultâneos.
+- CORE = BTCUSDT, ETHUSDT, SOLUSDT.
+- Não há ALT neste sistema vertical.
+- Cada ativo possui tolerâncias próprias já calculadas pela análise técnica.
+- O sistema deve priorizar qualidade, não quantidade.
 
 NÃO OPERAR SE:
-
-tendência = baixa
-
-mercado_lateral = true
-
-entrada_estendida = true
-
-RSI > 72
-
-RSI < 38
-
-candle fraco e volume normal
-
-variacao_5 > 0.012
-
-distancia_ma7 > 0.012
-
-pullback_valido = false
-
-espaco_ate_alvo = false
-
-preço perto demais da resistência
-
-movimento claramente esgotado antes da entrada
+- tendência = baixa
+- mercado_lateral = true
+- entrada_estendida = true
+- entrada_tardia = true
+- RSI > 72
+- RSI < 38
+- candle fraco e volume normal
+- pullback_valido = false
+- espaco_ate_alvo = false
+- preço perto demais da resistência
+- movimento claramente esgotado antes da entrada
 
 OPERAR SOMENTE SE:
-
-tendência = alta
-
-preço próximo da MA7 ou em retomada moderada
-
-RSI entre 40 e 65 preferencialmente
-
-volume alto OU candle forte
-
-mercado não lateral
-
-entrada não estendida
-
-pullback_valido = true
-
-existe espaço real até o alvo de aproximadamente 1%
-
-risco de reversão é baixo
+- tendência = alta
+- preço próximo da MA7 ou em retomada moderada
+- RSI entre 40 e 65 preferencialmente
+- volume alto OU candle forte OU rejeição de compra
+- mercado não lateral
+- entrada não estendida
+- entrada não tardia
+- pullback_valido = true
+- existe espaço real para continuação de curto prazo
+- risco de reversão é baixo
 
 REGRA CRÍTICA:
 Se houver dúvida, responda nao_operar.
+Não invente confirmação ausente nos dados.
 
 FORMATO:
 Responda somente JSON puro:
@@ -679,528 +736,552 @@ Variação 10 candles: {dados['variacao_10']}
 Distância MA7: {dados['distancia_ma7']}
 Distância MA25: {dados['distancia_ma25']}
 Subida contínua: {dados['subida_continua']}
+Retomada mínima: {dados['retomada_minima']}
 Mercado lateral: {dados['mercado_lateral']}
 Pullback válido: {dados['pullback_valido']}
+Entrada tardia: {dados['entrada_tardia']}
 Entrada estendida: {dados['entrada_estendida']}
+Impulso desde o fundo recente: {dados['impulso_desde_fundo']}
+Distância da máxima recente: {dados['distancia_maxima_recente']}
 Suporte curto: {dados['suporte_curto']}
 Resistência curta: {dados['resistencia_curta']}
 Distância resistência: {dados['distancia_resistencia']}
 Distância suporte: {dados['distancia_suporte']}
 Espaço até alvo: {dados['espaco_ate_alvo']}
+Parâmetros específicos do ativo: {dados['parametros_entrada']}
 """
 
-try:
-    resposta = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1
-    )
+    try:
+        resposta = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1
+        )
 
-    texto = resposta.choices[0].message.content.strip()
-    texto = texto.replace("```json", "").replace("```", "").replace("\n", "").strip()
+        texto = resposta.choices[0].message.content.strip()
+        texto = (
+            texto
+            .replace("```json", "")
+            .replace("```", "")
+            .replace("\n", "")
+            .strip()
+        )
 
-    inicio = texto.find("{")
-    fim = texto.rfind("}") + 1
-    texto = texto[inicio:fim]
+        inicio = texto.find("{")
+        fim = texto.rfind("}") + 1
+        texto = texto[inicio:fim]
 
-    analise_json = json.loads(texto)
+        analise_json = json.loads(texto)
 
-except Exception as e:
-    print("ERRO_IA:", str(e))
-    analise_json = {
-        "status": "nao_operar",
-        "direcao": "neutro",
-        "risco": "alto",
-        "qualidade": "baixa",
-        "explicacao": "Erro na leitura da IA"
+    except Exception as e:
+        print("ERRO_IA:", str(e))
+        analise_json = {
+            "status": "nao_operar",
+            "direcao": "neutro",
+            "risco": "alto",
+            "qualidade": "baixa",
+            "explicacao": "Erro na leitura da IA"
+        }
+
+    score = calcular_score(dados, analise_json)
+
+    return {
+        "dados": dados,
+        "analise_ia": analise_json,
+        "score": score
     }
 
-score = calcular_score(dados, analise_json)
-
-return {
-    "dados": dados,
-    "analise_ia": analise_json,
-    "score": score
-}
-
-=========================
-
-ROTAS DE ANÁLISE
-
-=========================
+# =========================
+# ROTAS DE ANÁLISE
+# =========================
 
 @app.get("/preco/{symbol}")
 def get_preco(symbol: str):
-symbol = symbol.upper()
-
-if symbol not in CONFIG_ATIVOS:
-    return {"erro": "Ativo não permitido"}
-
-url = f"{BINANCE_DATA_URL}/api/v3/ticker/price?symbol={symbol}"
-
-try:
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    data = response.json()
-
-    return {
-        "ativo": symbol,
-        "grupo": obter_grupo(symbol),
-        "preco": data["price"]
-    }
-
-except Exception as e:
-    return {
-        "ativo": symbol,
-        "erro": str(e)
-    }
-
-@app.get("/analise/{symbol}")
-def analise(symbol: str):
-try:
-return gerar_analise(symbol)
-
-except Exception as e:
-    return {
-        "ativo": symbol.upper(),
-        "erro": str(e)
-    }
-
-@app.get("/ia/{symbol}")
-def ia(symbol: str):
-try:
-return gerar_ia(symbol)
-
-except Exception as e:
-    return {
-        "ativo": symbol.upper(),
-        "erro": str(e)
-    }
-
-@app.get("/ordem-preview/{symbol}")
-def ordem_preview(symbol: str):
-try:
-symbol = symbol.upper()
+    symbol = symbol.upper()
 
     if symbol not in CONFIG_ATIVOS:
-        return {
-            "ativo": symbol,
-            "pode_operar": False,
-            "motivo": "Ativo não permitido"
-        }
+        return {"erro": "Ativo não permitido"}
 
-    data = gerar_ia(symbol)
+    url = f"{BINANCE_DATA_URL}/api/v3/ticker/price?symbol={symbol}"
 
-    dados = data.get("dados", {})
-    ia = data.get("analise_ia", {})
-    score = data.get("score", 0)
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
 
-    preco = dados.get("preco")
-
-    bloqueios = []
-
-    if dados.get("tendencia") != "alta":
-        bloqueios.append("Tendência não está em alta")
-
-    if dados.get("mercado_lateral") is True:
-        bloqueios.append("Mercado lateral")
-
-    if dados.get("movimento_fraco") is True:
-        bloqueios.append("Movimento fraco / sem força suficiente")
-    if dados.get("subida_continua") is True:
-        bloqueios.append("Entrada tardia: sequência de alta já desenvolvida")
-
-    forca_excepcional = (
-        dados.get("volume") == "alto"
-        and dados.get("forca_candle") == "forte"
-        and dados.get("entrada_estendida") is False
-        and dados.get("distancia_resistencia", 0) >= 0.007
-    )
-
-    if dados.get("macro_baixista") is True and not forca_excepcional:
-        bloqueios.append("Contexto 4H baixista / repique contra estrutura")
-
-    if dados.get("perto_resistencia_4h") is True and not forca_excepcional:
-        bloqueios.append("Preço próximo de resistência 4H")
-
-    if dados.get("entrada_estendida") is True and dados.get("rompimento_forte") is not True:
-        bloqueios.append("Entrada estendida sem rompimento forte")
-
-    if dados.get("momento_aquecido") is not True:
-        bloqueios.append("Momento ainda não aquecido para entrada")
-
-    if dados.get("pullback_valido") is not True:
-        bloqueios.append("Pullback ainda não confirmado")
-
-    if (
-        dados.get("espaco_ate_alvo") is False
-        and not (
-            dados.get("tendencia") == "alta"
-            and dados.get("volume") == "alto"
-        )
-     ):
-        bloqueios.append("Pouco espaço até resistência/alvo")
-
-    if score < 60:
-        bloqueios.append("Score abaixo de 60")
-
-    if dados.get("pullback_valido") is not True:
-        score = max(score - 20, 0)
-
-    if bloqueios:
         return {
             "ativo": symbol,
             "grupo": obter_grupo(symbol),
-            "pode_operar": False,
-            "motivo": " | ".join(bloqueios),
+            "preco": data["price"]
+        }
+
+    except Exception as e:
+        return {
+            "ativo": symbol,
+            "erro": str(e)
+        }
+
+
+@app.get("/analise/{symbol}")
+def analise(symbol: str):
+    try:
+        return gerar_analise(symbol)
+
+    except Exception as e:
+        return {
+            "ativo": symbol.upper(),
+            "erro": str(e)
+        }
+
+
+@app.get("/ia/{symbol}")
+def ia(symbol: str):
+    try:
+        return gerar_ia(symbol)
+
+    except Exception as e:
+        return {
+            "ativo": symbol.upper(),
+            "erro": str(e)
+        }
+
+
+@app.get("/ordem-preview/{symbol}")
+def ordem_preview(symbol: str):
+    try:
+        symbol = symbol.upper()
+
+        if symbol not in CONFIG_ATIVOS:
+            return {
+                "ativo": symbol,
+                "pode_operar": False,
+                "motivo": "Ativo não permitido"
+            }
+
+        data = gerar_ia(symbol)
+
+        dados = data.get("dados", {})
+        ia = data.get("analise_ia", {})
+        score = data.get("score", 0)
+
+        preco = dados.get("preco")
+
+        bloqueios = []
+
+        if dados.get("tendencia") != "alta":
+            bloqueios.append("Tendência não está em alta")
+
+        if dados.get("mercado_lateral") is True:
+            bloqueios.append("Mercado lateral")
+
+        if dados.get("movimento_fraco") is True:
+            bloqueios.append("Movimento fraco / sem força suficiente")
+        if dados.get("subida_continua") is True:
+            bloqueios.append("Entrada tardia: sequência de alta já desenvolvida")
+
+        forca_excepcional = (
+            dados.get("volume") == "alto"
+            and dados.get("forca_candle") == "forte"
+            and dados.get("entrada_estendida") is False
+            and dados.get("distancia_resistencia", 0) >= 0.007
+        )
+
+        if dados.get("macro_baixista") is True and not forca_excepcional:
+            bloqueios.append("Contexto 4H baixista / repique contra estrutura")
+
+        if dados.get("perto_resistencia_4h") is True and not forca_excepcional:
+            bloqueios.append("Preço próximo de resistência 4H")
+
+        if dados.get("entrada_estendida") is True and dados.get("rompimento_forte") is not True:
+            bloqueios.append("Entrada estendida sem rompimento forte")
+
+        if dados.get("momento_aquecido") is not True:
+            bloqueios.append("Momento ainda não aquecido para entrada")
+
+        if dados.get("pullback_valido") is not True:
+            bloqueios.append("Pullback ainda não confirmado")
+
+        if (
+            dados.get("espaco_ate_alvo") is False
+            and not (
+                dados.get("tendencia") == "alta"
+                and dados.get("volume") == "alto"
+            )
+         ):
+            bloqueios.append("Pouco espaço até resistência/alvo")
+
+        if score < 60:
+            bloqueios.append("Score abaixo de 60")
+
+        if dados.get("pullback_valido") is not True:
+            score = max(score - 20, 0)
+
+        if bloqueios:
+            return {
+                "ativo": symbol,
+                "grupo": obter_grupo(symbol),
+                "pode_operar": False,
+                "motivo": " | ".join(bloqueios),
+                "score": score,
+                "dados": dados,
+                "analise_ia": ia
+            }
+
+        entrada = preco
+        stop = preco * (1 - STOP_EXECUTOR_PERCENTUAL)
+        stop_limit = preco * (1 - STOP_LIMIT_EXECUTOR_PERCENTUAL)
+        alvo = preco * (1 + ALVO_EXECUTOR_PERCENTUAL)
+
+        return {
+            "ativo": symbol,
+            "grupo": obter_grupo(symbol),
+            "pode_operar": True,
+            "direcao": "compra",
+            "entrada": round(entrada, CONFIG_ATIVOS[symbol]["price_decimals"]),
+            "stop": round(stop, CONFIG_ATIVOS[symbol]["price_decimals"]),
+            "stop_limit": round(stop_limit, CONFIG_ATIVOS[symbol]["price_decimals"]),
+            "alvo": round(alvo, CONFIG_ATIVOS[symbol]["price_decimals"]),
             "score": score,
+            "valor_usdt": VALOR_POR_TRADE_USDT,
+            "confirmacao_necessaria": True,
             "dados": dados,
             "analise_ia": ia
         }
 
-    alvo_percentual = 0.01
-    risco_percentual = 0.006
-
-    entrada = preco
-    stop = preco * (1 - risco_percentual)
-    stop_limit = preco * (1 - risco_percentual - 0.001)
-    alvo = preco * (1 + alvo_percentual)
-
-    return {
-        "ativo": symbol,
-        "grupo": obter_grupo(symbol),
-        "pode_operar": True,
-        "direcao": "compra",
-        "entrada": round(entrada, CONFIG_ATIVOS[symbol]["price_decimals"]),
-        "stop": round(stop, CONFIG_ATIVOS[symbol]["price_decimals"]),
-        "stop_limit": round(stop_limit, CONFIG_ATIVOS[symbol]["price_decimals"]),
-        "alvo": round(alvo, CONFIG_ATIVOS[symbol]["price_decimals"]),
-        "score": score,
-        "valor_usdt": VALOR_POR_TRADE_USDT,
-        "confirmacao_necessaria": True,
-        "dados": dados,
-        "analise_ia": ia
-    }
-
-except Exception as e:
-    return {"erro": str(e)}
+    except Exception as e:
+        return {"erro": str(e)}
 
 @app.get("/diagnostico/{symbol}")
 def diagnostico(symbol: str):
-symbol = symbol.upper()
+    symbol = symbol.upper()
 
-try:
-    data = gerar_ia(symbol)
-    dados = data.get("dados", {})
-    ia = data.get("analise_ia", {})
-    score = data.get("score", 0)
+    try:
+        data = gerar_ia(symbol)
+        dados = data.get("dados", {})
+        ia = data.get("analise_ia", {})
+        score = data.get("score", 0)
 
-    bloqueios = []
+        bloqueios = []
 
-    if dados.get("tendencia") != "alta":
-        bloqueios.append("tendencia_baixa")
+        if dados.get("tendencia") != "alta":
+            bloqueios.append("tendencia_baixa")
 
-    if dados.get("mercado_lateral") is True:
-        bloqueios.append("mercado_lateral")
+        if dados.get("mercado_lateral") is True:
+            bloqueios.append("mercado_lateral")
 
-    if dados.get("movimento_fraco") is True:
-        bloqueios.append("movimento_fraco")
+        if dados.get("movimento_fraco") is True:
+            bloqueios.append("movimento_fraco")
 
-    if dados.get("entrada_estendida") is True:
-        bloqueios.append("entrada_estendida")
+        if dados.get("entrada_estendida") is True:
+            bloqueios.append("entrada_estendida")
 
-    if dados.get("pullback_valido") is not True:
-        bloqueios.append("pullback_invalido")
+        if dados.get("pullback_valido") is not True:
+            bloqueios.append("pullback_invalido")
 
-    if dados.get("espaco_ate_alvo") is False:
-        bloqueios.append("pouco_espaco_alvo")
+        if dados.get("espaco_ate_alvo") is False:
+            bloqueios.append("pouco_espaco_alvo")
 
-    if score < 60:
-        bloqueios.append("score_baixo")
+        if score < 60:
+            bloqueios.append("score_baixo")
 
-    return {
-        "ativo": symbol,
-        "pode_operar": len(bloqueios) == 0,
-        "score": score,
-        "bloqueios": bloqueios,
-        "dados": dados,
-        "analise_ia": ia
-    }
+        return {
+            "ativo": symbol,
+            "pode_operar": len(bloqueios) == 0,
+            "score": score,
+            "bloqueios": bloqueios,
+            "dados": dados,
+            "analise_ia": ia
+        }
 
-except Exception as e:
-    return {
-        "ativo": symbol,
-        "erro": str(e)
-    }
+    except Exception as e:
+        return {
+            "ativo": symbol,
+            "erro": str(e)
+        }
 
-=========================
-
-EXECUÇÃO DIRETA — MANTIDA, MAS NÃO USAR COMO FLUXO PRINCIPAL
-
-=========================
+# =========================
+# EXECUÇÃO DIRETA — MANTIDA, MAS NÃO USAR COMO FLUXO PRINCIPAL
+# =========================
 
 @app.post("/executar/{symbol}")
 def executar(
-symbol: str,
-confirmar: str = Query(default="NAO", description="Use SIM para executar ordem real")
+    symbol: str,
+    confirmar: str = Query(default="NAO", description="Use SIM para executar ordem real")
 ):
-try:
-symbol = symbol.upper()
+    try:
+        symbol = symbol.upper()
 
-    if confirmar != "SIM":
-        return {
-            "status": "bloqueado",
-            "motivo": "Confirmação ausente. Use ?confirmar=SIM para executar ordem real."
+        if confirmar != "SIM":
+            return {
+                "status": "bloqueado",
+                "motivo": "Confirmação ausente. Use ?confirmar=SIM para executar ordem real."
+            }
+
+        if symbol not in CONFIG_ATIVOS:
+            return {
+                "status": "bloqueado",
+                "motivo": "Ativo não permitido"
+            }
+
+        api_key = os.getenv("BINANCE_API_KEY")
+        secret = os.getenv("BINANCE_API_SECRET")
+
+        if not api_key or not secret:
+            return {"erro": "API Binance não configurada"}
+
+        preview_1 = ordem_preview(symbol)
+
+        if not preview_1.get("pode_operar"):
+            return {
+                "status": "bloqueado",
+                "motivo": preview_1.get("motivo"),
+                "preview": preview_1
+            }
+
+        time.sleep(1)
+
+        preview_2 = ordem_preview(symbol)
+
+        if not preview_2.get("pode_operar"):
+            return {
+                "status": "bloqueado",
+                "motivo": "Cenário mudou antes da execução.",
+                "preview_inicial": preview_1,
+                "preview_atual": preview_2
+            }
+
+        if preview_2.get("score", 0) < 82:
+            return {
+                "status": "bloqueado",
+                "motivo": "Score caiu antes da execução.",
+                "preview": preview_2
+            }
+
+        config = CONFIG_ATIVOS[symbol]
+        valor_usd = config["valor_usd"]
+
+        headers = {
+            "X-MBX-APIKEY": api_key
         }
 
-    if symbol not in CONFIG_ATIVOS:
-        return {
-            "status": "bloqueado",
-            "motivo": "Ativo não permitido"
+        params_compra = {
+            "symbol": symbol,
+            "side": "BUY",
+            "type": "MARKET",
+            "quoteOrderQty": str(valor_usd),
+            "newOrderRespType": "FULL",
+            "recvWindow": 5000,
+            "timestamp": int(time.time() * 1000)
         }
 
-    api_key = os.getenv("BINANCE_API_KEY")
-    secret = os.getenv("BINANCE_API_SECRET")
+        signed_compra = assinar_params(params_compra, secret)
+        url_compra = f"{BINANCE_API_URL}/api/v3/order?{signed_compra}"
 
-    if not api_key or not secret:
-        return {"erro": "API Binance não configurada"}
+        resposta_compra = requests.post(url_compra, headers=headers, timeout=10)
+        compra_json = resposta_compra.json()
 
-    preview_1 = ordem_preview(symbol)
+        if resposta_compra.status_code >= 400:
+            return {
+                "status": "erro_compra",
+                "resposta_binance": compra_json
+            }
 
-    if not preview_1.get("pode_operar"):
-        return {
-            "status": "bloqueado",
-            "motivo": preview_1.get("motivo"),
-            "preview": preview_1
+        executed_qty = float(compra_json.get("executedQty", 0))
+
+        if executed_qty <= 0:
+            return {
+                "status": "erro_compra",
+                "motivo": "Quantidade executada veio zerada"
+            }
+
+        cummulative_quote = float(compra_json.get("cummulativeQuoteQty", 0))
+
+        if cummulative_quote > 0 and executed_qty > 0:
+            preco_medio = cummulative_quote / executed_qty
+        else:
+            preco_medio = float(compra_json["fills"][0]["price"])
+
+        alvo = preco_medio * (1 + ALVO_EXECUTOR_PERCENTUAL)
+        stop = preco_medio * (1 - STOP_EXECUTOR_PERCENTUAL)
+        stop_limit = preco_medio * (1 - STOP_LIMIT_EXECUTOR_PERCENTUAL)
+
+        qty_oco = executed_qty * 0.995
+        qty_oco = arredondar(qty_oco, config["qty_decimals"])
+
+        params_oco = {
+            "symbol": symbol,
+            "side": "SELL",
+            "quantity": qty_oco,
+            "aboveType": "LIMIT_MAKER",
+            "abovePrice": arredondar(alvo, config["price_decimals"]),
+            "belowType": "STOP_LOSS_LIMIT",
+            "belowStopPrice": arredondar(stop, config["price_decimals"]),
+            "belowPrice": arredondar(stop_limit, config["price_decimals"]),
+            "belowTimeInForce": "GTC",
+            "recvWindow": 5000,
+            "timestamp": int(time.time() * 1000)
         }
 
-    time.sleep(1)
+        signed_oco = assinar_params(params_oco, secret)
+        url_oco = f"{BINANCE_API_URL}/api/v3/orderList/oco?{signed_oco}"
 
-    preview_2 = ordem_preview(symbol)
+        resposta_oco = requests.post(url_oco, headers=headers, timeout=10)
+        oco_json = resposta_oco.json()
 
-    if not preview_2.get("pode_operar"):
+        if resposta_oco.status_code >= 400:
+            return {
+                "status": "compra_ok_sem_oco",
+                "alerta": "Compra executada, mas OCO falhou",
+                "compra": compra_json,
+                "erro_oco": oco_json
+            }
+
         return {
-            "status": "bloqueado",
-            "motivo": "Cenário mudou antes da execução.",
-            "preview_inicial": preview_1,
-            "preview_atual": preview_2
-        }
-
-    if preview_2.get("score", 0) < 82:
-        return {
-            "status": "bloqueado",
-            "motivo": "Score caiu antes da execução.",
-            "preview": preview_2
-        }
-
-    config = CONFIG_ATIVOS[symbol]
-    valor_usd = config["valor_usd"]
-
-    headers = {
-        "X-MBX-APIKEY": api_key
-    }
-
-    params_compra = {
-        "symbol": symbol,
-        "side": "BUY",
-        "type": "MARKET",
-        "quoteOrderQty": str(valor_usd),
-        "newOrderRespType": "FULL",
-        "recvWindow": 5000,
-        "timestamp": int(time.time() * 1000)
-    }
-
-    signed_compra = assinar_params(params_compra, secret)
-    url_compra = f"{BINANCE_API_URL}/api/v3/order?{signed_compra}"
-
-    resposta_compra = requests.post(url_compra, headers=headers, timeout=10)
-    compra_json = resposta_compra.json()
-
-    if resposta_compra.status_code >= 400:
-        return {
-            "status": "erro_compra",
-            "resposta_binance": compra_json
-        }
-
-    executed_qty = float(compra_json.get("executedQty", 0))
-
-    if executed_qty <= 0:
-        return {
-            "status": "erro_compra",
-            "motivo": "Quantidade executada veio zerada"
-        }
-
-    preco_medio = float(compra_json["fills"][0]["price"])
-
-    alvo = preco_medio * 1.01
-    stop = preco_medio * 0.994
-    stop_limit = preco_medio * 0.993
-
-    qty_oco = executed_qty * 0.995
-    qty_oco = arredondar(qty_oco, config["qty_decimals"])
-
-    params_oco = {
-        "symbol": symbol,
-        "side": "SELL",
-        "quantity": qty_oco,
-        "aboveType": "LIMIT_MAKER",
-        "abovePrice": arredondar(alvo, config["price_decimals"]),
-        "belowType": "STOP_LOSS_LIMIT",
-        "belowStopPrice": arredondar(stop, config["price_decimals"]),
-        "belowPrice": arredondar(stop_limit, config["price_decimals"]),
-        "belowTimeInForce": "GTC",
-        "recvWindow": 5000,
-        "timestamp": int(time.time() * 1000)
-    }
-
-    signed_oco = assinar_params(params_oco, secret)
-    url_oco = f"{BINANCE_API_URL}/api/v3/orderList/oco?{signed_oco}"
-
-    resposta_oco = requests.post(url_oco, headers=headers, timeout=10)
-    oco_json = resposta_oco.json()
-
-    if resposta_oco.status_code >= 400:
-        return {
-            "status": "compra_ok_sem_oco",
-            "alerta": "Compra executada, mas OCO falhou",
+            "status": "executado_com_oco",
+            "ativo": symbol,
+            "grupo": obter_grupo(symbol),
+            "entrada": preco_medio,
+            "alvo": alvo,
+            "stop": stop,
+            "quantidade": qty_oco,
+            "valor_usdt": valor_usd,
             "compra": compra_json,
-            "erro_oco": oco_json
+            "oco": oco_json
         }
 
-    return {
-        "status": "executado_com_oco",
-        "ativo": symbol,
-        "grupo": obter_grupo(symbol),
-        "entrada": preco_medio,
-        "alvo": alvo,
-        "stop": stop,
-        "quantidade": qty_oco,
-        "valor_usdt": valor_usd,
-        "compra": compra_json,
-        "oco": oco_json
-    }
+    except Exception as e:
+        return {
+            "status": "erro",
+            "erro": str(e)
+        }
 
-except Exception as e:
-    return {
-        "status": "erro",
-        "erro": str(e)
-    }
 
 @app.get("/aprovar/{symbol}")
 def aprovar(
-symbol: str,
-token: str,
-preco: float = None,
-tempo: int = None
+    symbol: str,
+    token: str,
+    preco: float = None,
+    tempo: int = None
 ):
-approval_token = os.getenv("APPROVAL_TOKEN")
+    approval_token = os.getenv("APPROVAL_TOKEN")
 
-if token != approval_token:
-    return {"status": "bloqueado", "motivo": "Token inválido"}
+    if token != approval_token:
+        return {"status": "bloqueado", "motivo": "Token inválido"}
 
-return executar(symbol, confirmar="SIM")
+    return executar(symbol, confirmar="SIM")
 
-=========================
 
-TESTES E ALERTAS
-
-=========================
+# =========================
+# TESTES E ALERTAS
+# =========================
 
 @app.get("/teste-botao")
 def teste_botao():
-symbol = "BTCUSDT"
-dados = gerar_analise(symbol)
-preco_atual = dados["preco"]
+    symbol = "BTCUSDT"
+    dados = gerar_analise(symbol)
+    preco_atual = dados["preco"]
 
-mensagem = f"""🚨 TESTE COM BOTÃO
+    mensagem = f"""🚨 TESTE COM BOTÃO
 
 Ativo: {symbol}
 Grupo: {obter_grupo(symbol)}
 Preço sinal: {preco_atual}
 Valor planejado: {VALOR_POR_TRADE_USDT} USDT"""
 
-enviar_telegram(
-    mensagem,
-    symbol=symbol,
-    preco=preco_atual
-)
+    enviar_telegram(
+        mensagem,
+        symbol=symbol,
+        preco=preco_atual
+    )
 
-return {
-    "status": "enviado",
-    "ativo": symbol,
-    "grupo": obter_grupo(symbol),
-    "preco_sinal": preco_atual
-}
+    return {
+        "status": "enviado",
+        "ativo": symbol,
+        "grupo": obter_grupo(symbol),
+        "preco_sinal": preco_atual
+    }
+
 
 @app.get("/alerta-teste/{symbol}")
 def alerta_teste(symbol: str):
-symbol = symbol.upper()
+    symbol = symbol.upper()
 
-preview = ordem_preview(symbol)
+    preview = ordem_preview(symbol)
 
-if not preview.get("pode_operar"):
+    if not preview.get("pode_operar"):
+        return {
+            "status": "sem_alerta",
+            "ativo": symbol,
+            "motivo": preview.get("motivo"),
+            "preview": preview
+        }
+
+    mensagem = f"""🚨 OPORTUNIDADE DETECTADA
+
+Ativo: {preview['ativo']}
+Grupo: {preview['grupo']}
+Direção: {preview['direcao']}
+Score: {preview['score']}
+Entrada: {preview['entrada']}
+Stop: {preview['stop']}
+Alvo: {preview['alvo']}
+Valor planejado: {preview['valor_usdt']} USDT
+
+⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
+
+    enviar_telegram(
+        mensagem,
+        symbol=symbol,
+        preco=preview["entrada"],
+        tempo=int(time.time())
+    )
+
     return {
-        "status": "sem_alerta",
+        "status": "alerta_enviado",
         "ativo": symbol,
-        "motivo": preview.get("motivo"),
         "preview": preview
     }
 
-mensagem = f"""🚨 OPORTUNIDADE DETECTADA
 
-Ativo: {preview['ativo']}
-Grupo: {preview['grupo']}
-Direção: {preview['direcao']}
-Score: {preview['score']}
-Entrada: {preview['entrada']}
-Stop: {preview['stop']}
-Alvo: {preview['alvo']}
-Valor planejado: {preview['valor_usdt']} USDT
-
-⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
-
-enviar_telegram(
-    mensagem,
-    symbol=symbol,
-    preco=preview["entrada"],
-    tempo=int(time.time())
-)
-
-return {
-    "status": "alerta_enviado",
-    "ativo": symbol,
-    "preview": preview
-}
-
-=========================
-
-MONITORAMENTO AUTOMÁTICO
-
-=========================
+# =========================
+# MONITORAMENTO AUTOMÁTICO
+# =========================
 
 def monitorar_mercado():
-while True:
-try:
-for symbol in ATIVOS_MONITORADOS:
-agora = time.time()
+    while True:
+        try:
+            for symbol in ATIVOS_MONITORADOS:
+                agora = time.time()
 
-            if symbol in ultimos_sinais:
-                if agora - ultimos_sinais[symbol] < 600:
-                    continue
+                if symbol in ultimos_sinais:
+                    if agora - ultimos_sinais[symbol] < 600:
+                        continue
 
-            preview = ordem_preview(symbol)
+                preview = ordem_preview(symbol)
 
-            if preview.get("pode_operar"):
+                if preview.get("pode_operar"):
 
-                registrar_evento("sinal_detectado", {
-                    "symbol": symbol,
-                    "grupo": preview.get("grupo"),
-                    "score": preview.get("score"),
-                    "entrada": preview.get("entrada"),
-                    "valor_usdt": VALOR_POR_TRADE_USDT
-                })
+                    dados_sinal = preview.get("dados", {})
 
-                mensagem = f"""🚨 OPORTUNIDADE DETECTADA
+                    registrar_evento("sinal_detectado", {
+                        "symbol": symbol,
+                        "grupo": preview.get("grupo"),
+                        "score": preview.get("score"),
+                        "entrada": preview.get("entrada"),
+                        "valor_usdt": VALOR_POR_TRADE_USDT,
+                        "variacao_5": dados_sinal.get("variacao_5"),
+                        "variacao_10": dados_sinal.get("variacao_10"),
+                        "distancia_ma7": dados_sinal.get("distancia_ma7"),
+                        "impulso_desde_fundo": dados_sinal.get("impulso_desde_fundo"),
+                        "distancia_maxima_recente": dados_sinal.get("distancia_maxima_recente"),
+                        "entrada_tardia": dados_sinal.get("entrada_tardia"),
+                        "entrada_estendida": dados_sinal.get("entrada_estendida"),
+                        "pullback_valido": dados_sinal.get("pullback_valido"),
+                        "retomada_minima": dados_sinal.get("retomada_minima"),
+                        "parametros_entrada": dados_sinal.get("parametros_entrada")
+                    })
+
+                    mensagem = f"""🚨 OPORTUNIDADE DETECTADA
 
 Ativo: {preview['ativo']}
 Grupo: {preview['grupo']}
@@ -1213,23 +1294,24 @@ Valor planejado: {preview['valor_usdt']} USDT
 
 ⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
 
-                enviar_telegram(
-                    mensagem,
-                    symbol=symbol,
-                    preco=preview["entrada"],
-                    tempo=int(time.time())
-                )
+                    enviar_telegram(
+                        mensagem,
+                        symbol=symbol,
+                        preco=preview["entrada"],
+                        tempo=int(time.time())
+                    )
 
-                ultimos_sinais[symbol] = agora
+                    ultimos_sinais[symbol] = agora
 
-            time.sleep(3)
+                time.sleep(3)
 
-    except Exception as e:
-        print("ERRO_MONITORAMENTO:", str(e))
+        except Exception as e:
+            print("ERRO_MONITORAMENTO:", str(e))
 
-    time.sleep(60)
+        time.sleep(60)
+
 
 @app.on_event("startup")
 def iniciar_monitoramento():
-thread = threading.Thread(target=monitorar_mercado, daemon=True)
-thread.start()
+    thread = threading.Thread(target=monitorar_mercado, daemon=True)
+    thread.start()
