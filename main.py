@@ -21,31 +21,93 @@ BINANCE_DATA_URL = "https://data-api.binance.vision"
 
 VALOR_POR_TRADE_USDT = 50
 
+# Parâmetros reais do executor local principal (porta 8001).
+# Mantidos centralizados para evitar divergência entre preview, mensagem e execução.
+ALVO_EXECUTOR_PERCENTUAL = 0.007       # +0,70%
+STOP_EXECUTOR_PERCENTUAL = 0.0055      # -0,55%
+STOP_LIMIT_EXECUTOR_PERCENTUAL = 0.0065  # -0,65%
+
 EXECUTOR_BASE_URL = os.getenv(
     "EXECUTOR_BASE_URL",
-    "https://announcer-yippee-election.ngrok-free.dev"
-)
+    "https://trader-jundiai.ngrok.app"
+).rstrip("/")
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ============================================================
+# PARÂMETROS DE ENTRADA POR ATIVO
+#
+# A lógica-base continua a mesma para os três ativos.
+# O que muda são somente tolerâncias ligadas à volatilidade/ruído
+# e ao padrão de entrada tardia observado no histórico.
+# ============================================================
 
 CONFIG_ATIVOS = {
     "BTCUSDT": {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 6,
         "price_decimals": 2,
-        "grupo": "CORE"
+        "grupo": "CORE",
+        "entrada": {
+            "impulso_tardio": 0.0045,
+            "distancia_maxima_tardia": 0.0012,
+            "variacao5_estendida": 0.0065,
+            "distancia_ma7_estendida": 0.0090,
+            "pullback_ma7_min": -0.0060,
+            "pullback_ma7_max": 0.0045,
+            "momento_ma7_min": -0.0030,
+            "momento_ma7_max": 0.0045,
+            "lateral_range_max": 0.0025,
+            "movimento_fraco_var5": 0.0015,
+            "movimento_fraco_var10": 0.0030,
+            "score_var5_min": -0.0030,
+            "score_var5_max": 0.0050,
+            "score_dist_ma7_max": 0.0045
+        }
     },
     "ETHUSDT": {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 5,
         "price_decimals": 2,
-        "grupo": "CORE"
+        "grupo": "CORE",
+        "entrada": {
+            "impulso_tardio": 0.0060,
+            "distancia_maxima_tardia": 0.0015,
+            "variacao5_estendida": 0.0080,
+            "distancia_ma7_estendida": 0.0110,
+            "pullback_ma7_min": -0.0075,
+            "pullback_ma7_max": 0.0055,
+            "momento_ma7_min": -0.0040,
+            "momento_ma7_max": 0.0055,
+            "lateral_range_max": 0.0030,
+            "movimento_fraco_var5": 0.0020,
+            "movimento_fraco_var10": 0.0040,
+            "score_var5_min": -0.0040,
+            "score_var5_max": 0.0065,
+            "score_dist_ma7_max": 0.0055
+        }
     },
     "SOLUSDT": {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 3,
         "price_decimals": 2,
-        "grupo": "CORE"
+        "grupo": "CORE",
+        "entrada": {
+            "impulso_tardio": 0.0060,
+            "distancia_maxima_tardia": 0.0018,
+            "variacao5_estendida": 0.0100,
+            "distancia_ma7_estendida": 0.0130,
+            "pullback_ma7_min": -0.0090,
+            "pullback_ma7_max": 0.0065,
+            "momento_ma7_min": -0.0050,
+            "momento_ma7_max": 0.0065,
+            "lateral_range_max": 0.0040,
+            "movimento_fraco_var5": 0.0025,
+            "movimento_fraco_var10": 0.0050,
+            "score_var5_min": -0.0050,
+            "score_var5_max": 0.0080,
+            "score_dist_ma7_max": 0.0065
+        }
     }
 }
 
@@ -57,7 +119,6 @@ GRUPOS = {
 ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
 ultimos_sinais = {}
-
 
 # =========================
 # TELEGRAM
@@ -326,6 +387,9 @@ def calcular_contexto_4h(symbol):
 def calcular_score(dados, ia):
     score = 0
 
+    symbol = dados.get("ativo", "")
+    config_entrada = CONFIG_ATIVOS.get(symbol, {}).get("entrada", {})
+
     if ia.get("status") == "operar":
         score += 15
 
@@ -346,10 +410,15 @@ def calcular_score(dados, ia):
     elif 60 < dados["rsi"] <= 65:
         score += 5
 
-    if -0.004 <= dados["variacao_5"] <= 0.006:
+    score_var5_min = config_entrada.get("score_var5_min", -0.004)
+    score_var5_max = config_entrada.get("score_var5_max", 0.006)
+
+    if score_var5_min <= dados["variacao_5"] <= score_var5_max:
         score += 15
 
-    if abs(dados["distancia_ma7"]) <= 0.006:
+    score_dist_ma7_max = config_entrada.get("score_dist_ma7_max", 0.006)
+
+    if abs(dados["distancia_ma7"]) <= score_dist_ma7_max:
         score += 10
 
     if dados["mercado_lateral"] is False:
@@ -391,10 +460,13 @@ def gerar_analise(symbol):
     if symbol not in CONFIG_ATIVOS:
         raise ValueError("Ativo não permitido.")
 
+    config = CONFIG_ATIVOS[symbol]
+    p = config["entrada"]
+
     data = get_klines(symbol)
-    
     edge = calcular_edge_contexto(data)
     contexto_4h = calcular_contexto_4h(symbol)
+
     closes = [float(c[4]) for c in data]
     highs = [float(c[2]) for c in data]
     lows = [float(c[3]) for c in data]
@@ -405,7 +477,6 @@ def gerar_analise(symbol):
     ma25 = calcular_ma(closes, 25)
 
     tendencia = "alta" if ma7 > ma25 else "baixa"
-
     rsi = calcular_rsi(closes)
 
     variacao_5 = (closes[-1] - closes[-5]) / closes[-5]
@@ -413,12 +484,12 @@ def gerar_analise(symbol):
 
     distancia_ma7 = (preco - ma7) / ma7
     distancia_ma25 = (preco - ma25) / ma25
-    
+
     pullback_valido = (
         tendencia == "alta"
         and preco >= ma25
-        and distancia_ma7 <= 0.006
-        and distancia_ma7 >= -0.008
+        and distancia_ma7 <= p["pullback_ma7_max"]
+        and distancia_ma7 >= p["pullback_ma7_min"]
     )
 
     volume_atual = volumes[-1]
@@ -438,61 +509,63 @@ def gerar_analise(symbol):
         forca_candle = "indefinida"
     else:
         candle_alta = fechamento > abertura
-        forca_candle = "forte" if candle_alta and corpo > (range_total * 0.6) else "fraca"
+        forca_candle = (
+            "forte"
+            if candle_alta and corpo > (range_total * 0.6)
+            else "fraca"
+        )
 
-ultimos = closes[-4:]
-subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
+    # Bloqueio já existente: quatro fechamentos consecutivos crescentes.
+    ultimos = closes[-4:]
+    subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
 
-# Confirmação mínima de retomada:
-# evita comprar enquanto o preço ainda está simplesmente recuando,
-# sem exigir rompimento ou confirmação forte que atrase a entrada.
-retomada_minima = (
-    closes[-2] > closes[-3]
-    and closes[-1] >= closes[-2]
-)
+    # Mantida como informação diagnóstica.
+    # Não virou bloqueio duro nesta versão para não atrasar entradas.
+    retomada_minima = (
+        closes[-2] > closes[-3]
+        and closes[-1] >= closes[-2]
+    )
 
     range_10 = max(highs[-10:]) - min(lows[-10:])
     range_percentual = range_10 / preco if preco else 0
 
-    mercado_lateral = range_percentual < 0.003
+    mercado_lateral = range_percentual < p["lateral_range_max"]
 
     movimento_fraco = (
-        abs(variacao_5) < 0.002 and
-        abs(variacao_10) < 0.004
+        abs(variacao_5) < p["movimento_fraco_var5"]
+        and abs(variacao_10) < p["movimento_fraco_var10"]
     )
 
     # ============================================================
-# BLOQUEIO DE ENTRADA TARDIA
-# Evita comprar depois que boa parte do impulso já aconteceu
-# e o preço está muito próximo da máxima recente.
-# ============================================================
+    # BLOQUEIO DE ENTRADA TARDIA ESPECÍFICO POR ATIVO
+    # ============================================================
 
-fundo_recente = min(lows[-6:])
-maxima_recente = max(highs[-6:])
+    fundo_recente = min(lows[-6:])
+    maxima_recente = max(highs[-6:])
 
-impulso_desde_fundo = (
-    (preco - fundo_recente) / fundo_recente
-    if fundo_recente > 0
-    else 0
-)
+    impulso_desde_fundo = (
+        (preco - fundo_recente) / fundo_recente
+        if fundo_recente > 0
+        else 0
+    )
 
-distancia_maxima_recente = (
-    (maxima_recente - preco) / preco
-    if preco > 0
-    else 0
-)
+    distancia_maxima_recente = (
+        (maxima_recente - preco) / preco
+        if preco > 0
+        else 0
+    )
 
-entrada_tardia = (
-    impulso_desde_fundo >= 0.005
-    and distancia_maxima_recente <= 0.0015
-)
+    entrada_tardia = (
+        impulso_desde_fundo >= p["impulso_tardio"]
+        and distancia_maxima_recente <= p["distancia_maxima_tardia"]
+    )
 
-entrada_estendida = (
-    variacao_5 > 0.008
-    or distancia_ma7 > 0.012
-    or rsi > 72
-    or entrada_tardia
-)
+    entrada_estendida = (
+        variacao_5 > p["variacao5_estendida"]
+        or distancia_ma7 > p["distancia_ma7_estendida"]
+        or rsi > 72
+        or entrada_tardia
+    )
 
     momento_aquecido = (
         tendencia == "alta"
@@ -501,21 +574,23 @@ entrada_estendida = (
         and movimento_fraco is False
         and rsi >= 45
         and rsi <= 68
-        and distancia_ma7 <= 0.006
-        and distancia_ma7 >= -0.004
+        and distancia_ma7 <= p["momento_ma7_max"]
+        and distancia_ma7 >= p["momento_ma7_min"]
         and (
             volume_status == "alto"
             or forca_candle == "forte"
             or edge["rejeicao"] == "compra"
         )
     )
-    
+
     suporte_curto = min(lows[-10:])
     resistencia_curta = max(highs[-10:])
 
     distancia_resistencia = (resistencia_curta - preco) / preco
     distancia_suporte = (preco - suporte_curto) / preco
 
+    # Mantido em 0,5% nesta versão para não reduzir drasticamente
+    # a frequência de sinais. O alvo real do executor é +0,70%.
     espaco_ate_alvo = distancia_resistencia >= 0.005
 
     rompimento_forte = (
@@ -542,13 +617,23 @@ entrada_estendida = (
         "distancia_ma25": round(distancia_ma25, 4),
         "pullback_valido": pullback_valido,
         "subida_continua": subida_continua,
+        "retomada_minima": retomada_minima,
         "mercado_lateral": mercado_lateral,
         "movimento_fraco": movimento_fraco,
+        "entrada_tardia": entrada_tardia,
         "entrada_estendida": entrada_estendida,
+        "impulso_desde_fundo": round(impulso_desde_fundo, 4),
+        "distancia_maxima_recente": round(distancia_maxima_recente, 4),
         "rompimento_forte": rompimento_forte,
         "momento_aquecido": momento_aquecido,
-        "suporte_curto": round(suporte_curto, CONFIG_ATIVOS[symbol]["price_decimals"]),
-        "resistencia_curta": round(resistencia_curta, CONFIG_ATIVOS[symbol]["price_decimals"]),
+        "suporte_curto": round(
+            suporte_curto,
+            CONFIG_ATIVOS[symbol]["price_decimals"]
+        ),
+        "resistencia_curta": round(
+            resistencia_curta,
+            CONFIG_ATIVOS[symbol]["price_decimals"]
+        ),
         "distancia_resistencia": round(distancia_resistencia, 4),
         "distancia_suporte": round(distancia_suporte, 4),
         "espaco_ate_alvo": espaco_ate_alvo,
@@ -559,9 +644,18 @@ entrada_estendida = (
         "perto_resistencia_4h": contexto_4h["perto_resistencia_4h"],
         "volume_4h_fraco": contexto_4h["volume_4h_fraco"],
         "pressao_rompimento": edge["pressao_rompimento"],
-        "rejeicao": edge["rejeicao"]
+        "rejeicao": edge["rejeicao"],
+        "parametros_entrada": {
+            "impulso_tardio": p["impulso_tardio"],
+            "distancia_maxima_tardia": p["distancia_maxima_tardia"],
+            "variacao5_estendida": p["variacao5_estendida"],
+            "distancia_ma7_estendida": p["distancia_ma7_estendida"],
+            "pullback_ma7_min": p["pullback_ma7_min"],
+            "pullback_ma7_max": p["pullback_ma7_max"],
+            "momento_ma7_min": p["momento_ma7_min"],
+            "momento_ma7_max": p["momento_ma7_max"]
+        }
     }
-
 
 # =========================
 # IA
@@ -574,26 +668,27 @@ def gerar_ia(symbol):
 Você é um analista quantitativo profissional de trading em criptomoedas spot, curto prazo.
 
 OBJETIVO:
-Validar apenas entradas com chance real de movimento de curto prazo para alvo aproximado de +1% e stop de -0,6%.
+Validar apenas entradas com chance real de movimento de curto prazo para
+alvo aproximado de +0,70%, stop trigger de -0,55% e stop limit de -0,65%.
 
 CONTEXTO:
 - Dinheiro real.
 - Entrada manual via Telegram.
-- Execução por executor local.
+- Execução principal no executor local.
 - Máximo 2 trades simultâneos.
-- CORE = BTCUSDT, ETHUSDT.
-- ALT = XRPUSDT, LINKUSDT.
+- CORE = BTCUSDT, ETHUSDT, SOLUSDT.
+- Não há ALT neste sistema vertical.
+- Cada ativo possui tolerâncias próprias já calculadas pela análise técnica.
 - O sistema deve priorizar qualidade, não quantidade.
 
 NÃO OPERAR SE:
 - tendência = baixa
 - mercado_lateral = true
 - entrada_estendida = true
+- entrada_tardia = true
 - RSI > 72
 - RSI < 38
 - candle fraco e volume normal
-- variacao_5 > 0.012
-- distancia_ma7 > 0.012
 - pullback_valido = false
 - espaco_ate_alvo = false
 - preço perto demais da resistência
@@ -603,15 +698,17 @@ OPERAR SOMENTE SE:
 - tendência = alta
 - preço próximo da MA7 ou em retomada moderada
 - RSI entre 40 e 65 preferencialmente
-- volume alto OU candle forte
+- volume alto OU candle forte OU rejeição de compra
 - mercado não lateral
 - entrada não estendida
+- entrada não tardia
 - pullback_valido = true
-- existe espaço real até o alvo de aproximadamente 1%
+- existe espaço real para continuação de curto prazo
 - risco de reversão é baixo
 
 REGRA CRÍTICA:
 Se houver dúvida, responda nao_operar.
+Não invente confirmação ausente nos dados.
 
 FORMATO:
 Responda somente JSON puro:
@@ -639,14 +736,19 @@ Variação 10 candles: {dados['variacao_10']}
 Distância MA7: {dados['distancia_ma7']}
 Distância MA25: {dados['distancia_ma25']}
 Subida contínua: {dados['subida_continua']}
+Retomada mínima: {dados['retomada_minima']}
 Mercado lateral: {dados['mercado_lateral']}
 Pullback válido: {dados['pullback_valido']}
+Entrada tardia: {dados['entrada_tardia']}
 Entrada estendida: {dados['entrada_estendida']}
+Impulso desde o fundo recente: {dados['impulso_desde_fundo']}
+Distância da máxima recente: {dados['distancia_maxima_recente']}
 Suporte curto: {dados['suporte_curto']}
 Resistência curta: {dados['resistencia_curta']}
 Distância resistência: {dados['distancia_resistencia']}
 Distância suporte: {dados['distancia_suporte']}
 Espaço até alvo: {dados['espaco_ate_alvo']}
+Parâmetros específicos do ativo: {dados['parametros_entrada']}
 """
 
     try:
@@ -657,7 +759,13 @@ Espaço até alvo: {dados['espaco_ate_alvo']}
         )
 
         texto = resposta.choices[0].message.content.strip()
-        texto = texto.replace("```json", "").replace("```", "").replace("\n", "").strip()
+        texto = (
+            texto
+            .replace("```json", "")
+            .replace("```", "")
+            .replace("\n", "")
+            .strip()
+        )
 
         inicio = texto.find("{")
         fim = texto.rfind("}") + 1
@@ -819,13 +927,10 @@ def ordem_preview(symbol: str):
                 "analise_ia": ia
             }
 
-        alvo_percentual = 0.01
-        risco_percentual = 0.006
-
         entrada = preco
-        stop = preco * (1 - risco_percentual)
-        stop_limit = preco * (1 - risco_percentual - 0.001)
-        alvo = preco * (1 + alvo_percentual)
+        stop = preco * (1 - STOP_EXECUTOR_PERCENTUAL)
+        stop_limit = preco * (1 - STOP_LIMIT_EXECUTOR_PERCENTUAL)
+        alvo = preco * (1 + ALVO_EXECUTOR_PERCENTUAL)
 
         return {
             "ativo": symbol,
@@ -989,11 +1094,16 @@ def executar(
                 "motivo": "Quantidade executada veio zerada"
             }
 
-        preco_medio = float(compra_json["fills"][0]["price"])
+        cummulative_quote = float(compra_json.get("cummulativeQuoteQty", 0))
 
-        alvo = preco_medio * 1.01
-        stop = preco_medio * 0.994
-        stop_limit = preco_medio * 0.993
+        if cummulative_quote > 0 and executed_qty > 0:
+            preco_medio = cummulative_quote / executed_qty
+        else:
+            preco_medio = float(compra_json["fills"][0]["price"])
+
+        alvo = preco_medio * (1 + ALVO_EXECUTOR_PERCENTUAL)
+        stop = preco_medio * (1 - STOP_EXECUTOR_PERCENTUAL)
+        stop_limit = preco_medio * (1 - STOP_LIMIT_EXECUTOR_PERCENTUAL)
 
         qty_oco = executed_qty * 0.995
         qty_oco = arredondar(qty_oco, config["qty_decimals"])
@@ -1151,12 +1261,24 @@ def monitorar_mercado():
 
                 if preview.get("pode_operar"):
 
+                    dados_sinal = preview.get("dados", {})
+
                     registrar_evento("sinal_detectado", {
                         "symbol": symbol,
                         "grupo": preview.get("grupo"),
                         "score": preview.get("score"),
                         "entrada": preview.get("entrada"),
-                        "valor_usdt": VALOR_POR_TRADE_USDT
+                        "valor_usdt": VALOR_POR_TRADE_USDT,
+                        "variacao_5": dados_sinal.get("variacao_5"),
+                        "variacao_10": dados_sinal.get("variacao_10"),
+                        "distancia_ma7": dados_sinal.get("distancia_ma7"),
+                        "impulso_desde_fundo": dados_sinal.get("impulso_desde_fundo"),
+                        "distancia_maxima_recente": dados_sinal.get("distancia_maxima_recente"),
+                        "entrada_tardia": dados_sinal.get("entrada_tardia"),
+                        "entrada_estendida": dados_sinal.get("entrada_estendida"),
+                        "pullback_valido": dados_sinal.get("pullback_valido"),
+                        "retomada_minima": dados_sinal.get("retomada_minima"),
+                        "parametros_entrada": dados_sinal.get("parametros_entrada")
                     })
 
                     mensagem = f"""🚨 OPORTUNIDADE DETECTADA
