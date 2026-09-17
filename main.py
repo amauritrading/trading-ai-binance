@@ -1,4 +1,4 @@
-# DEPLOY_MARKER_VERTICAL_20260914
+# DEPLOY_MARKER_VERTICAL_RESTAURADO_20260917
 from fastapi import FastAPI, Query
 import requests
 import os
@@ -36,11 +36,11 @@ EXECUTOR_BASE_URL = os.getenv(
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ============================================================
-# PARÂMETROS DE ENTRADA POR ATIVO
+# CONFIGURAÇÃO DOS ATIVOS
 #
-# A lógica-base continua a mesma para os três ativos.
-# O que muda são somente tolerâncias ligadas à volatilidade/ruído
-# e ao padrão de entrada tardia observado no histórico.
+# Baseline restaurado: a lógica de entrada volta a ser comum
+# aos três ativos. Microajustes por ativo serão introduzidos
+# somente depois de medidos separadamente em novas operações.
 # ============================================================
 
 CONFIG_ATIVOS = {
@@ -48,67 +48,19 @@ CONFIG_ATIVOS = {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 6,
         "price_decimals": 2,
-        "grupo": "CORE",
-        "entrada": {
-            "impulso_tardio": 0.0045,
-            "distancia_maxima_tardia": 0.0012,
-            "variacao5_estendida": 0.0065,
-            "distancia_ma7_estendida": 0.0090,
-            "pullback_ma7_min": -0.0060,
-            "pullback_ma7_max": 0.0045,
-            "momento_ma7_min": -0.0030,
-            "momento_ma7_max": 0.0045,
-            "lateral_range_max": 0.0025,
-            "movimento_fraco_var5": 0.0015,
-            "movimento_fraco_var10": 0.0030,
-            "score_var5_min": -0.0030,
-            "score_var5_max": 0.0050,
-            "score_dist_ma7_max": 0.0045
-        }
+        "grupo": "CORE"
     },
     "ETHUSDT": {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 5,
         "price_decimals": 2,
-        "grupo": "CORE",
-        "entrada": {
-            "impulso_tardio": 0.0060,
-            "distancia_maxima_tardia": 0.0015,
-            "variacao5_estendida": 0.0080,
-            "distancia_ma7_estendida": 0.0110,
-            "pullback_ma7_min": -0.0075,
-            "pullback_ma7_max": 0.0055,
-            "momento_ma7_min": -0.0040,
-            "momento_ma7_max": 0.0055,
-            "lateral_range_max": 0.0030,
-            "movimento_fraco_var5": 0.0020,
-            "movimento_fraco_var10": 0.0040,
-            "score_var5_min": -0.0040,
-            "score_var5_max": 0.0065,
-            "score_dist_ma7_max": 0.0055
-        }
+        "grupo": "CORE"
     },
     "SOLUSDT": {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 3,
         "price_decimals": 2,
-        "grupo": "CORE",
-        "entrada": {
-            "impulso_tardio": 0.0060,
-            "distancia_maxima_tardia": 0.0018,
-            "variacao5_estendida": 0.0100,
-            "distancia_ma7_estendida": 0.0130,
-            "pullback_ma7_min": -0.0090,
-            "pullback_ma7_max": 0.0065,
-            "momento_ma7_min": -0.0050,
-            "momento_ma7_max": 0.0065,
-            "lateral_range_max": 0.0040,
-            "movimento_fraco_var5": 0.0025,
-            "movimento_fraco_var10": 0.0050,
-            "score_var5_min": -0.0050,
-            "score_var5_max": 0.0080,
-            "score_dist_ma7_max": 0.0065
-        }
+        "grupo": "CORE"
     }
 }
 
@@ -388,9 +340,6 @@ def calcular_contexto_4h(symbol):
 def calcular_score(dados, ia):
     score = 0
 
-    symbol = dados.get("ativo", "")
-    config_entrada = CONFIG_ATIVOS.get(symbol, {}).get("entrada", {})
-
     if ia.get("status") == "operar":
         score += 15
 
@@ -411,15 +360,10 @@ def calcular_score(dados, ia):
     elif 60 < dados["rsi"] <= 65:
         score += 5
 
-    score_var5_min = config_entrada.get("score_var5_min", -0.004)
-    score_var5_max = config_entrada.get("score_var5_max", 0.006)
-
-    if score_var5_min <= dados["variacao_5"] <= score_var5_max:
+    if -0.004 <= dados["variacao_5"] <= 0.006:
         score += 15
 
-    score_dist_ma7_max = config_entrada.get("score_dist_ma7_max", 0.006)
-
-    if abs(dados["distancia_ma7"]) <= score_dist_ma7_max:
+    if abs(dados["distancia_ma7"]) <= 0.006:
         score += 10
 
     if dados["mercado_lateral"] is False:
@@ -434,6 +378,7 @@ def calcular_score(dados, ia):
     if dados.get("rsi", 0) > 70:
         score -= 6
 
+    # Mantido como penalização do baseline, não como bloqueio duro.
     if dados.get("subida_continua") is True:
         score -= 8
 
@@ -461,9 +406,6 @@ def gerar_analise(symbol):
     if symbol not in CONFIG_ATIVOS:
         raise ValueError("Ativo não permitido.")
 
-    config = CONFIG_ATIVOS[symbol]
-    p = config["entrada"]
-
     data = get_klines(symbol)
     edge = calcular_edge_contexto(data)
     contexto_4h = calcular_contexto_4h(symbol)
@@ -486,11 +428,12 @@ def gerar_analise(symbol):
     distancia_ma7 = (preco - ma7) / ma7
     distancia_ma25 = (preco - ma25) / ma25
 
+    # Baseline anterior funcional.
     pullback_valido = (
         tendencia == "alta"
         and preco >= ma25
-        and distancia_ma7 <= p["pullback_ma7_max"]
-        and distancia_ma7 >= p["pullback_ma7_min"]
+        and distancia_ma7 <= 0.006
+        and distancia_ma7 >= -0.008
     )
 
     volume_atual = volumes[-1]
@@ -506,6 +449,7 @@ def gerar_analise(symbol):
     corpo = abs(fechamento - abertura)
     range_total = maxima - minima
 
+    # Correção preservada: candle forte para compra precisa ser candle de alta.
     if range_total == 0:
         forca_candle = "indefinida"
     else:
@@ -516,30 +460,14 @@ def gerar_analise(symbol):
             else "fraca"
         )
 
-    # Bloqueio já existente: quatro fechamentos consecutivos crescentes.
     ultimos = closes[-4:]
     subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
 
-    # Mantida como informação diagnóstica.
-    # Não virou bloqueio duro nesta versão para não atrasar entradas.
+    # Métricas diagnósticas preservadas para aprendizado, sem bloquear entrada.
     retomada_minima = (
         closes[-2] > closes[-3]
         and closes[-1] >= closes[-2]
     )
-
-    range_10 = max(highs[-10:]) - min(lows[-10:])
-    range_percentual = range_10 / preco if preco else 0
-
-    mercado_lateral = range_percentual < p["lateral_range_max"]
-
-    movimento_fraco = (
-        abs(variacao_5) < p["movimento_fraco_var5"]
-        and abs(variacao_10) < p["movimento_fraco_var10"]
-    )
-
-    # ============================================================
-    # BLOQUEIO DE ENTRADA TARDIA ESPECÍFICO POR ATIVO
-    # ============================================================
 
     fundo_recente = min(lows[-6:])
     maxima_recente = max(highs[-6:])
@@ -556,16 +484,22 @@ def gerar_analise(symbol):
         else 0
     )
 
-    entrada_tardia = (
-        impulso_desde_fundo >= p["impulso_tardio"]
-        and distancia_maxima_recente <= p["distancia_maxima_tardia"]
+    range_10 = max(highs[-10:]) - min(lows[-10:])
+    range_percentual = range_10 / preco if preco else 0
+
+    # Baseline anterior.
+    mercado_lateral = range_percentual < 0.003
+
+    movimento_fraco = (
+        abs(variacao_5) < 0.002
+        and abs(variacao_10) < 0.004
     )
 
+    # Baseline anterior: sem bloqueio novo de entrada_tardia e sem tabela ampla por ativo.
     entrada_estendida = (
-        variacao_5 > p["variacao5_estendida"]
-        or distancia_ma7 > p["distancia_ma7_estendida"]
+        variacao_5 > 0.012
+        or distancia_ma7 > 0.012
         or rsi > 72
-        or entrada_tardia
     )
 
     momento_aquecido = (
@@ -575,8 +509,8 @@ def gerar_analise(symbol):
         and movimento_fraco is False
         and rsi >= 45
         and rsi <= 68
-        and distancia_ma7 <= p["momento_ma7_max"]
-        and distancia_ma7 >= p["momento_ma7_min"]
+        and distancia_ma7 <= 0.006
+        and distancia_ma7 >= -0.004
         and (
             volume_status == "alto"
             or forca_candle == "forte"
@@ -590,9 +524,10 @@ def gerar_analise(symbol):
     distancia_resistencia = (resistencia_curta - preco) / preco
     distancia_suporte = (preco - suporte_curto) / preco
 
-    # Mantido em 0,5% nesta versão para não reduzir drasticamente
-    # a frequência de sinais. O alvo real do executor é +0,70%.
-    espaco_ate_alvo = distancia_resistencia >= 0.005
+    # Microcorreção estrutural:
+    # o executor busca +0,70%; exigimos pelo menos +0,80% de espaço
+    # para não aceitar alvo além de uma resistência ainda não rompida.
+    espaco_ate_alvo = distancia_resistencia >= 0.008
 
     rompimento_forte = (
         volume_status == "alto"
@@ -621,7 +556,6 @@ def gerar_analise(symbol):
         "retomada_minima": retomada_minima,
         "mercado_lateral": mercado_lateral,
         "movimento_fraco": movimento_fraco,
-        "entrada_tardia": entrada_tardia,
         "entrada_estendida": entrada_estendida,
         "impulso_desde_fundo": round(impulso_desde_fundo, 4),
         "distancia_maxima_recente": round(distancia_maxima_recente, 4),
@@ -645,17 +579,7 @@ def gerar_analise(symbol):
         "perto_resistencia_4h": contexto_4h["perto_resistencia_4h"],
         "volume_4h_fraco": contexto_4h["volume_4h_fraco"],
         "pressao_rompimento": edge["pressao_rompimento"],
-        "rejeicao": edge["rejeicao"],
-        "parametros_entrada": {
-            "impulso_tardio": p["impulso_tardio"],
-            "distancia_maxima_tardia": p["distancia_maxima_tardia"],
-            "variacao5_estendida": p["variacao5_estendida"],
-            "distancia_ma7_estendida": p["distancia_ma7_estendida"],
-            "pullback_ma7_min": p["pullback_ma7_min"],
-            "pullback_ma7_max": p["pullback_ma7_max"],
-            "momento_ma7_min": p["momento_ma7_min"],
-            "momento_ma7_max": p["momento_ma7_max"]
-        }
+        "rejeicao": edge["rejeicao"]
     }
 
 # =========================
@@ -679,17 +603,17 @@ CONTEXTO:
 - Máximo 2 trades simultâneos.
 - CORE = BTCUSDT, ETHUSDT, SOLUSDT.
 - Não há ALT neste sistema vertical.
-- Cada ativo possui tolerâncias próprias já calculadas pela análise técnica.
 - O sistema deve priorizar qualidade, não quantidade.
 
 NÃO OPERAR SE:
 - tendência = baixa
 - mercado_lateral = true
 - entrada_estendida = true
-- entrada_tardia = true
 - RSI > 72
 - RSI < 38
 - candle fraco e volume normal
+- variacao_5 > 0.012
+- distancia_ma7 > 0.012
 - pullback_valido = false
 - espaco_ate_alvo = false
 - preço perto demais da resistência
@@ -702,9 +626,8 @@ OPERAR SOMENTE SE:
 - volume alto OU candle forte OU rejeição de compra
 - mercado não lateral
 - entrada não estendida
-- entrada não tardia
 - pullback_valido = true
-- existe espaço real para continuação de curto prazo
+- existe espaço real até o alvo, sem resistência curta antes dele
 - risco de reversão é baixo
 
 REGRA CRÍTICA:
@@ -737,19 +660,14 @@ Variação 10 candles: {dados['variacao_10']}
 Distância MA7: {dados['distancia_ma7']}
 Distância MA25: {dados['distancia_ma25']}
 Subida contínua: {dados['subida_continua']}
-Retomada mínima: {dados['retomada_minima']}
 Mercado lateral: {dados['mercado_lateral']}
 Pullback válido: {dados['pullback_valido']}
-Entrada tardia: {dados['entrada_tardia']}
 Entrada estendida: {dados['entrada_estendida']}
-Impulso desde o fundo recente: {dados['impulso_desde_fundo']}
-Distância da máxima recente: {dados['distancia_maxima_recente']}
 Suporte curto: {dados['suporte_curto']}
 Resistência curta: {dados['resistencia_curta']}
 Distância resistência: {dados['distancia_resistencia']}
 Distância suporte: {dados['distancia_suporte']}
 Espaço até alvo: {dados['espaco_ate_alvo']}
-Parâmetros específicos do ativo: {dados['parametros_entrada']}
 """
 
     try:
@@ -877,14 +795,15 @@ def ordem_preview(symbol: str):
 
         if dados.get("movimento_fraco") is True:
             bloqueios.append("Movimento fraco / sem força suficiente")
-        if dados.get("subida_continua") is True:
-            bloqueios.append("Entrada tardia: sequência de alta já desenvolvida")
+
+        # Baseline restaurado:
+        # subida_continua reduz score, mas não é bloqueio duro isoladamente.
 
         forca_excepcional = (
             dados.get("volume") == "alto"
             and dados.get("forca_candle") == "forte"
             and dados.get("entrada_estendida") is False
-            and dados.get("distancia_resistencia", 0) >= 0.007
+            and dados.get("distancia_resistencia", 0) >= 0.008
         )
 
         if dados.get("macro_baixista") is True and not forca_excepcional:
@@ -902,13 +821,9 @@ def ordem_preview(symbol: str):
         if dados.get("pullback_valido") is not True:
             bloqueios.append("Pullback ainda não confirmado")
 
-        if (
-            dados.get("espaco_ate_alvo") is False
-            and not (
-                dados.get("tendencia") == "alta"
-                and dados.get("volume") == "alto"
-            )
-         ):
+        # Microcorreção confirmada após #20:
+        # não permitir que volume alto ignore resistência antes do alvo.
+        if dados.get("espaco_ate_alvo") is False:
             bloqueios.append("Pouco espaço até resistência/alvo")
 
         if score < 60:
@@ -1106,8 +1021,24 @@ def executar(
         stop = preco_medio * (1 - STOP_EXECUTOR_PERCENTUAL)
         stop_limit = preco_medio * (1 - STOP_LIMIT_EXECUTOR_PERCENTUAL)
 
-        qty_oco = executed_qty * 0.995
-        qty_oco = arredondar(qty_oco, config["qty_decimals"])
+        # Correção preservada também na rota direta de contingência:
+        # não aplicar corte fixo de 0,5%. Descontar apenas eventual
+        # comissão cobrada no próprio ativo-base.
+        asset_base = symbol[:-4] if symbol.endswith("USDT") else symbol
+        comissao_base = sum(
+            float(fill.get("commission", 0) or 0)
+            for fill in (compra_json.get("fills") or [])
+            if str(fill.get("commissionAsset") or "").upper() == asset_base
+        )
+        quantidade_liquida = executed_qty - comissao_base
+
+        if quantidade_liquida <= 0:
+            return {
+                "status": "erro_compra",
+                "motivo": "Quantidade líquida inválida após comissão"
+            }
+
+        qty_oco = arredondar(quantidade_liquida, config["qty_decimals"])
 
         params_oco = {
             "symbol": symbol,
@@ -1275,11 +1206,9 @@ def monitorar_mercado():
                         "distancia_ma7": dados_sinal.get("distancia_ma7"),
                         "impulso_desde_fundo": dados_sinal.get("impulso_desde_fundo"),
                         "distancia_maxima_recente": dados_sinal.get("distancia_maxima_recente"),
-                        "entrada_tardia": dados_sinal.get("entrada_tardia"),
                         "entrada_estendida": dados_sinal.get("entrada_estendida"),
                         "pullback_valido": dados_sinal.get("pullback_valido"),
-                        "retomada_minima": dados_sinal.get("retomada_minima"),
-                        "parametros_entrada": dados_sinal.get("parametros_entrada")
+                        "retomada_minima": dados_sinal.get("retomada_minima")
                     })
 
                     mensagem = f"""🚨 OPORTUNIDADE DETECTADA
