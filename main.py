@@ -1,4 +1,4 @@
-# DEPLOY_MARKER_VERTICAL_RESTAURADO_20260917
+# DEPLOY_MARKER_VERTICAL_MICROAJUSTE1_20260917
 from fastapi import FastAPI, Query
 import requests
 import os
@@ -48,19 +48,41 @@ CONFIG_ATIVOS = {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 6,
         "price_decimals": 2,
-        "grupo": "CORE"
+        "grupo": "CORE",
+        "entrada": {
+            # Microajuste 1: BTC com janela ligeiramente mais estreita.
+            "pullback_ma7_min": -0.0070,
+            "pullback_ma7_max": 0.0050,
+            "momento_ma7_min": -0.0035,
+            "momento_ma7_max": 0.0050
+        }
     },
     "ETHUSDT": {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 5,
         "price_decimals": 2,
-        "grupo": "CORE"
+        "grupo": "CORE",
+        "entrada": {
+            # Microajuste 1: ETH permanece muito próximo do baseline.
+            "pullback_ma7_min": -0.0075,
+            "pullback_ma7_max": 0.0055,
+            "momento_ma7_min": -0.0040,
+            "momento_ma7_max": 0.0055
+        }
     },
     "SOLUSDT": {
         "valor_usd": VALOR_POR_TRADE_USDT,
         "qty_decimals": 3,
         "price_decimals": 2,
-        "grupo": "CORE"
+        "grupo": "CORE",
+        "entrada": {
+            # Microajuste 1: SOL aceita correção um pouco mais profunda,
+            # sem ampliar o limite positivo acima do baseline para não perseguir preço.
+            "pullback_ma7_min": -0.0090,
+            "pullback_ma7_max": 0.0060,
+            "momento_ma7_min": -0.0045,
+            "momento_ma7_max": 0.0060
+        }
     }
 }
 
@@ -406,6 +428,9 @@ def gerar_analise(symbol):
     if symbol not in CONFIG_ATIVOS:
         raise ValueError("Ativo não permitido.")
 
+    config = CONFIG_ATIVOS[symbol]
+    p = config["entrada"]
+
     data = get_klines(symbol)
     edge = calcular_edge_contexto(data)
     contexto_4h = calcular_contexto_4h(symbol)
@@ -428,12 +453,13 @@ def gerar_analise(symbol):
     distancia_ma7 = (preco - ma7) / ma7
     distancia_ma25 = (preco - ma25) / ma25
 
-    # Baseline anterior funcional.
+    # Baseline preservado com Microajuste 1 por ativo:
+    # somente a janela de proximidade da MA7 varia entre BTC/ETH/SOL.
     pullback_valido = (
         tendencia == "alta"
         and preco >= ma25
-        and distancia_ma7 <= 0.006
-        and distancia_ma7 >= -0.008
+        and distancia_ma7 <= p["pullback_ma7_max"]
+        and distancia_ma7 >= p["pullback_ma7_min"]
     )
 
     volume_atual = volumes[-1]
@@ -509,8 +535,8 @@ def gerar_analise(symbol):
         and movimento_fraco is False
         and rsi >= 45
         and rsi <= 68
-        and distancia_ma7 <= 0.006
-        and distancia_ma7 >= -0.004
+        and distancia_ma7 <= p["momento_ma7_max"]
+        and distancia_ma7 >= p["momento_ma7_min"]
         and (
             volume_status == "alto"
             or forca_candle == "forte"
@@ -579,7 +605,13 @@ def gerar_analise(symbol):
         "perto_resistencia_4h": contexto_4h["perto_resistencia_4h"],
         "volume_4h_fraco": contexto_4h["volume_4h_fraco"],
         "pressao_rompimento": edge["pressao_rompimento"],
-        "rejeicao": edge["rejeicao"]
+        "rejeicao": edge["rejeicao"],
+        "parametros_entrada": {
+            "pullback_ma7_min": p["pullback_ma7_min"],
+            "pullback_ma7_max": p["pullback_ma7_max"],
+            "momento_ma7_min": p["momento_ma7_min"],
+            "momento_ma7_max": p["momento_ma7_max"]
+        }
     }
 
 # =========================
