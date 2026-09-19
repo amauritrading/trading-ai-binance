@@ -1,4 +1,4 @@
-# DEPLOY_MARKER_VERTICAL_MICROAJUSTE1_20260917
+# DEPLOY_MARKER_VERTICAL_CANDLE_FECHADO_20260919
 from fastapi import FastAPI, Query
 import requests
 import os
@@ -226,6 +226,14 @@ def get_klines(symbol, interval="5m", limit=50):
     return response.json()
 
 
+def get_preco_atual(symbol):
+    url = f"{BINANCE_DATA_URL}/api/v3/ticker/price?symbol={symbol}"
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    dados = response.json()
+    return float(dados["price"])
+
+
 def calcular_ma(closes, periodo):
     return sum(closes[-periodo:]) / periodo
 
@@ -314,12 +322,20 @@ def calcular_edge_contexto(data):
         }
 def calcular_contexto_4h(symbol):
     try:
-        data_4h = get_klines(symbol, interval="4h", limit=120)
+        data_4h_bruta = get_klines(symbol, interval="4h", limit=120)
+
+        # A ultima kline da Binance pode estar em formacao.
+        # O contexto 4h usa somente candles concluidos para evitar
+        # que a classificacao macro mude no meio do candle.
+        data_4h = data_4h_bruta[:-1]
+
+        if len(data_4h) < 99:
+            raise ValueError("Historico 4h insuficiente para MA99 com candle fechado")
 
         closes = [float(c[4]) for c in data_4h]
         volumes = [float(c[5]) for c in data_4h]
 
-        preco = closes[-1]
+        preco_fechado_4h = closes[-1]
         ma7_4h = calcular_ma(closes, 7)
         ma25_4h = calcular_ma(closes, 25)
         ma99_4h = calcular_ma(closes, 99)
@@ -328,13 +344,13 @@ def calcular_contexto_4h(symbol):
         volume_medio_4h = sum(volumes[-10:]) / 10
 
         macro_baixista = (
-            preco < ma25_4h
+            preco_fechado_4h < ma25_4h
             and ma25_4h < ma99_4h
         )
 
         perto_resistencia_4h = (
-            preco < ma25_4h
-            and ((ma25_4h - preco) / preco) < 0.012
+            preco_fechado_4h < ma25_4h
+            and ((ma25_4h - preco_fechado_4h) / preco_fechado_4h) < 0.012
         )
 
         volume_4h_fraco = volume_atual_4h < volume_medio_4h
@@ -345,7 +361,8 @@ def calcular_contexto_4h(symbol):
             "ma99_4h": ma99_4h,
             "macro_baixista": macro_baixista,
             "perto_resistencia_4h": perto_resistencia_4h,
-            "volume_4h_fraco": volume_4h_fraco
+            "volume_4h_fraco": volume_4h_fraco,
+            "contexto_4h_candle_fechado": True
         }
 
     except Exception as e:
@@ -356,7 +373,8 @@ def calcular_contexto_4h(symbol):
             "ma99_4h": None,
             "macro_baixista": False,
             "perto_resistencia_4h": False,
-            "volume_4h_fraco": False
+            "volume_4h_fraco": False,
+            "contexto_4h_candle_fechado": False
         }
 
 def calcular_score(dados, ia):
@@ -431,7 +449,18 @@ def gerar_analise(symbol):
     config = CONFIG_ATIVOS[symbol]
     p = config["entrada"]
 
-    data = get_klines(symbol)
+    data_bruta = get_klines(symbol, limit=50)
+
+    # A ultima kline pode estar em formacao. O SETUP usa somente candles
+    # fechados; o GATILHO/localizacao usa o preco atual da Binance.
+    # Assim evitamos confirmar forca, RSI, volume ou rejeicao em um candle
+    # que ainda pode mudar antes do fechamento, sem atrasar a entrada 5 min.
+    data = data_bruta[:-1]
+
+    if len(data) < 25:
+        raise ValueError("Historico 5m insuficiente para analise com candle fechado")
+
+    preco = get_preco_atual(symbol)
     edge = calcular_edge_contexto(data)
     contexto_4h = calcular_contexto_4h(symbol)
 
@@ -440,21 +469,22 @@ def gerar_analise(symbol):
     lows = [float(c[3]) for c in data]
     volumes = [float(c[5]) for c in data]
 
-    preco = closes[-1]
+    ultimo_fechamento = closes[-1]
     ma7 = calcular_ma(closes, 7)
     ma25 = calcular_ma(closes, 25)
 
     tendencia = "alta" if ma7 > ma25 else "baixa"
     rsi = calcular_rsi(closes)
 
+    # Variacoes pertencem ao SETUP e por isso usam fechamentos confirmados.
     variacao_5 = (closes[-1] - closes[-5]) / closes[-5]
     variacao_10 = (closes[-1] - closes[-10]) / closes[-10]
 
+    # Distancias usam o preco atual: sao parte do gatilho/localizacao da entrada.
     distancia_ma7 = (preco - ma7) / ma7
     distancia_ma25 = (preco - ma25) / ma25
 
-    # Baseline preservado com Microajuste 1 por ativo:
-    # somente a janela de proximidade da MA7 varia entre BTC/ETH/SOL.
+    # Baseline preservado com Microajuste 1 por ativo.
     pullback_valido = (
         tendencia == "alta"
         and preco >= ma25
@@ -462,6 +492,7 @@ def gerar_analise(symbol):
         and distancia_ma7 >= p["pullback_ma7_min"]
     )
 
+    # Volume do ultimo candle FECHADO contra a media dos 10 fechados.
     volume_atual = volumes[-1]
     volume_medio = sum(volumes[-10:]) / 10
     volume_status = "alto" if volume_atual > volume_medio * 1.15 else "normal"
@@ -475,7 +506,7 @@ def gerar_analise(symbol):
     corpo = abs(fechamento - abertura)
     range_total = maxima - minima
 
-    # Correção preservada: candle forte para compra precisa ser candle de alta.
+    # Candle forte somente apos FECHAR e somente se for candle de alta.
     if range_total == 0:
         forca_candle = "indefinida"
     else:
@@ -489,7 +520,7 @@ def gerar_analise(symbol):
     ultimos = closes[-4:]
     subida_continua = ultimos[0] < ultimos[1] < ultimos[2] < ultimos[3]
 
-    # Métricas diagnósticas preservadas para aprendizado, sem bloquear entrada.
+    # Continua apenas diagnostica nesta etapa.
     retomada_minima = (
         closes[-2] > closes[-3]
         and closes[-1] >= closes[-2]
@@ -513,7 +544,6 @@ def gerar_analise(symbol):
     range_10 = max(highs[-10:]) - min(lows[-10:])
     range_percentual = range_10 / preco if preco else 0
 
-    # Baseline anterior.
     mercado_lateral = range_percentual < 0.003
 
     movimento_fraco = (
@@ -521,7 +551,7 @@ def gerar_analise(symbol):
         and abs(variacao_10) < 0.004
     )
 
-    # Baseline anterior: sem bloqueio novo de entrada_tardia e sem tabela ampla por ativo.
+    # Thresholds do baseline permanecem inalterados.
     entrada_estendida = (
         variacao_5 > 0.012
         or distancia_ma7 > 0.012
@@ -544,15 +574,15 @@ def gerar_analise(symbol):
         )
     )
 
+    # Suporte/resistencia sao formados apenas por candles ja fechados.
     suporte_curto = min(lows[-10:])
     resistencia_curta = max(highs[-10:])
 
     distancia_resistencia = (resistencia_curta - preco) / preco
     distancia_suporte = (preco - suporte_curto) / preco
 
-    # Microcorreção estrutural:
-    # o executor busca +0,70%; exigimos pelo menos +0,80% de espaço
-    # para não aceitar alvo além de uma resistência ainda não rompida.
+    # Mantida a protecao estrutural ja validada: TP +0,70%;
+    # exigencia de pelo menos +0,80% de espaco ate a resistencia.
     espaco_ate_alvo = distancia_resistencia >= 0.008
 
     rompimento_forte = (
@@ -567,6 +597,9 @@ def gerar_analise(symbol):
         "ativo": symbol,
         "grupo": obter_grupo(symbol),
         "preco": preco,
+        "preco_ultimo_fechamento_5m": ultimo_fechamento,
+        "setup_candles_fechados": True,
+        "gatilho_preco_atual": True,
         "ma7": ma7,
         "ma25": ma25,
         "tendencia": tendencia,
@@ -604,6 +637,7 @@ def gerar_analise(symbol):
         "macro_baixista": contexto_4h["macro_baixista"],
         "perto_resistencia_4h": contexto_4h["perto_resistencia_4h"],
         "volume_4h_fraco": contexto_4h["volume_4h_fraco"],
+        "contexto_4h_candle_fechado": contexto_4h.get("contexto_4h_candle_fechado"),
         "pressao_rompimento": edge["pressao_rompimento"],
         "rejeicao": edge["rejeicao"],
         "parametros_entrada": {
@@ -636,6 +670,8 @@ CONTEXTO:
 - CORE = BTCUSDT, ETHUSDT, SOLUSDT.
 - Não há ALT neste sistema vertical.
 - O sistema deve priorizar qualidade, não quantidade.
+- Indicadores de setup (tendencia, RSI, volume, candle, rejeicao e estrutura) usam candles fechados.
+- O campo Preço representa o preço atual e serve para localização/gatilho, não para "inventar" confirmação intrabar.
 
 NÃO OPERAR SE:
 - tendência = baixa
