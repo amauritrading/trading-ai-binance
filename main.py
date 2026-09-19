@@ -20,7 +20,7 @@ app = FastAPI()
 BINANCE_API_URL = "https://api.binance.com"
 BINANCE_DATA_URL = "https://data-api.binance.vision"
 
-VALOR_POR_TRADE_USDT = 50
+VALOR_POR_TRADE_USDT = 10
 
 # Parâmetros reais do executor local principal (porta 8001).
 # Mantidos centralizados para evitar divergência entre preview, mensagem e execução.
