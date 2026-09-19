@@ -1,4 +1,4 @@
-# DEPLOY_MARKER_VERTICAL_CANDLE_FECHADO_20260919
+# DEPLOY_MARKER_VERTICAL_ENTRY_V2_20260919
 from fastapi import FastAPI, Query
 import requests
 import os
@@ -21,6 +21,7 @@ BINANCE_API_URL = "https://api.binance.com"
 BINANCE_DATA_URL = "https://data-api.binance.vision"
 
 VALOR_POR_TRADE_USDT = 10
+ESTRATEGIA_VERSAO = "vertical_entry_v2_retomada_confirmada_20260919"
 
 # Parâmetros reais do executor local principal (porta 8001).
 # Mantidos centralizados para evitar divergência entre preview, mensagem e execução.
@@ -176,7 +177,8 @@ def home():
         "status": "online",
         "sistema": "trading-ai",
         "ativos_monitorados": ATIVOS_MONITORADOS,
-        "valor_por_trade_usdt": VALOR_POR_TRADE_USDT
+        "valor_por_trade_usdt": VALOR_POR_TRADE_USDT,
+        "estrategia_versao": ESTRATEGIA_VERSAO
     }
 
 
@@ -506,6 +508,26 @@ def gerar_analise(symbol):
     corpo = abs(fechamento - abertura)
     range_total = maxima - minima
 
+    # ENTRY V2 — confirmação de retomada após pullback.
+    # O setup continua vindo de candles fechados, mas a entrada só é liberada
+    # quando o preço atual volta a superar o último fechamento e recupera ao
+    # menos a metade do range do último candle fechado. Isso evita comprar
+    # enquanto a correção ainda está em andamento, sem exigir rompimento da
+    # máxima/resistência curta.
+    houve_pullback_recente = (
+        closes[-1] < closes[-2]
+        or closes[-2] < closes[-3]
+    )
+
+    meio_ultimo_candle = minima + (range_total * 0.5) if range_total > 0 else fechamento
+    nivel_retomada = max(fechamento, meio_ultimo_candle)
+
+    retomada_confirmada = (
+        houve_pullback_recente is True
+        and preco > ultimo_fechamento
+        and preco >= nivel_retomada
+    )
+
     # Candle forte somente apos FECHAR e somente se for candle de alta.
     if range_total == 0:
         forca_candle = "indefinida"
@@ -567,6 +589,7 @@ def gerar_analise(symbol):
         and rsi <= 68
         and distancia_ma7 <= p["momento_ma7_max"]
         and distancia_ma7 >= p["momento_ma7_min"]
+        and retomada_confirmada is True
         and (
             volume_status == "alto"
             or forca_candle == "forte"
@@ -600,6 +623,10 @@ def gerar_analise(symbol):
         "preco_ultimo_fechamento_5m": ultimo_fechamento,
         "setup_candles_fechados": True,
         "gatilho_preco_atual": True,
+        "estrategia_versao": ESTRATEGIA_VERSAO,
+        "houve_pullback_recente": houve_pullback_recente,
+        "nivel_retomada": round(nivel_retomada, CONFIG_ATIVOS[symbol]["price_decimals"]),
+        "retomada_confirmada": retomada_confirmada,
         "ma7": ma7,
         "ma25": ma25,
         "tendencia": tendencia,
@@ -683,6 +710,7 @@ NÃO OPERAR SE:
 - variacao_5 > 0.012
 - distancia_ma7 > 0.012
 - pullback_valido = false
+- retomada_confirmada = false
 - espaco_ate_alvo = false
 - preço perto demais da resistência
 - movimento claramente esgotado antes da entrada
@@ -695,6 +723,7 @@ OPERAR SOMENTE SE:
 - mercado não lateral
 - entrada não estendida
 - pullback_valido = true
+- retomada_confirmada = true
 - existe espaço real até o alvo, sem resistência curta antes dele
 - risco de reversão é baixo
 
@@ -730,6 +759,9 @@ Distância MA25: {dados['distancia_ma25']}
 Subida contínua: {dados['subida_continua']}
 Mercado lateral: {dados['mercado_lateral']}
 Pullback válido: {dados['pullback_valido']}
+Houve pullback recente: {dados['houve_pullback_recente']}
+Nível de retomada: {dados['nivel_retomada']}
+Retomada confirmada: {dados['retomada_confirmada']}
 Entrada estendida: {dados['entrada_estendida']}
 Suporte curto: {dados['suporte_curto']}
 Resistência curta: {dados['resistencia_curta']}
@@ -889,6 +921,9 @@ def ordem_preview(symbol: str):
         if dados.get("pullback_valido") is not True:
             bloqueios.append("Pullback ainda não confirmado")
 
+        if dados.get("retomada_confirmada") is not True:
+            bloqueios.append("Retomada compradora ainda não confirmada")
+
         # Microcorreção confirmada após #20:
         # não permitir que volume alto ignore resistência antes do alvo.
         if dados.get("espaco_ate_alvo") is False:
@@ -956,11 +991,30 @@ def diagnostico(symbol: str):
         if dados.get("movimento_fraco") is True:
             bloqueios.append("movimento_fraco")
 
-        if dados.get("entrada_estendida") is True:
+        forca_excepcional = (
+            dados.get("volume") == "alto"
+            and dados.get("forca_candle") == "forte"
+            and dados.get("entrada_estendida") is False
+            and dados.get("distancia_resistencia", 0) >= 0.008
+        )
+
+        if dados.get("macro_baixista") is True and not forca_excepcional:
+            bloqueios.append("contexto_4h_baixista")
+
+        if dados.get("perto_resistencia_4h") is True and not forca_excepcional:
+            bloqueios.append("perto_resistencia_4h")
+
+        if dados.get("entrada_estendida") is True and dados.get("rompimento_forte") is not True:
             bloqueios.append("entrada_estendida")
+
+        if dados.get("momento_aquecido") is not True:
+            bloqueios.append("momento_nao_aquecido")
 
         if dados.get("pullback_valido") is not True:
             bloqueios.append("pullback_invalido")
+
+        if dados.get("retomada_confirmada") is not True:
+            bloqueios.append("retomada_nao_confirmada")
 
         if dados.get("espaco_ate_alvo") is False:
             bloqueios.append("pouco_espaco_alvo")
@@ -970,6 +1024,7 @@ def diagnostico(symbol: str):
 
         return {
             "ativo": symbol,
+            "estrategia_versao": ESTRATEGIA_VERSAO,
             "pode_operar": len(bloqueios) == 0,
             "score": score,
             "bloqueios": bloqueios,
@@ -1276,6 +1331,9 @@ def monitorar_mercado():
                         "distancia_maxima_recente": dados_sinal.get("distancia_maxima_recente"),
                         "entrada_estendida": dados_sinal.get("entrada_estendida"),
                         "pullback_valido": dados_sinal.get("pullback_valido"),
+                        "houve_pullback_recente": dados_sinal.get("houve_pullback_recente"),
+                        "nivel_retomada": dados_sinal.get("nivel_retomada"),
+                        "retomada_confirmada": dados_sinal.get("retomada_confirmada"),
                         "retomada_minima": dados_sinal.get("retomada_minima")
                     })
 
