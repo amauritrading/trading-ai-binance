@@ -21,7 +21,7 @@ BINANCE_API_URL = "https://api.binance.com"
 BINANCE_DATA_URL = "https://data-api.binance.vision"
 
 VALOR_POR_TRADE_USDT = 10
-ESTRATEGIA_VERSAO = "vertical_hibrido_v3_base_lateral_20260920"
+ESTRATEGIA_VERSAO = "vertical_hibrido_v3_1_confirmacao_volume_20260920"
 
 # Parâmetros reais do executor local principal (porta 8001).
 # Mantidos centralizados para evitar divergência entre preview, mensagem e execução.
@@ -550,10 +550,19 @@ def gerar_analise(symbol):
         and preco >= ema9
     )
 
-    confirmacao_compra = bool(
+    # V3.1 — correção fiel ao princípio do lateral:
+    # uma simples reação intrabar não aprova sozinha.
+    # Se a confirmação vier apenas do preço atual, exigimos também
+    # volume do último candle fechado acima da média de 10 candles.
+    reacao_atual_com_volume = bool(
         reacao_atual
-        or rejeicao_compra
+        and volume_candle_forte
+    )
+
+    confirmacao_compra = bool(
+        rejeicao_compra
         or qualidade_candle
+        or reacao_atual_com_volume
     )
 
     # Range macro apenas para identificar mercado morto / volatilidade mínima.
@@ -775,6 +784,7 @@ def gerar_analise(symbol):
         "alvo_plausivel": alvo_plausivel,
 
         "reacao_atual": reacao_atual,
+        "reacao_atual_com_volume": reacao_atual_com_volume,
         "rejeicao_compra": rejeicao_compra,
         "rejeicao_pavio_comprador": rejeicao_pavio_comprador,
         "qualidade_candle": qualidade_candle,
