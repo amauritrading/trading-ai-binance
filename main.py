@@ -21,7 +21,7 @@ BINANCE_API_URL = "https://api.binance.com"
 BINANCE_DATA_URL = "https://data-api.binance.vision"
 
 VALOR_POR_TRADE_USDT = 10
-ESTRATEGIA_VERSAO = "vertical_hibrido_v3_1_btc_eth_20260924"
+ESTRATEGIA_VERSAO = "vertical_adaptativo_v1_btc_eth_20260925"
 
 # Parâmetros reais do executor local principal (porta 8001).
 # Mantidos centralizados para evitar divergência entre preview, mensagem e execução.
@@ -34,6 +34,7 @@ EXECUTOR_BASE_URL = os.getenv(
     "https://trader-jundiai.ngrok.app"
 ).rstrip("/")
 
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ============================================================
@@ -86,7 +87,8 @@ CONFIG_ATIVOS = {
             "volume_pressao_relativo": 1.20,
             "amplitude_minima": 0.0060
         }
-    },}
+    }
+}
 
 GRUPOS = {
     "CORE": ["BTCUSDT", "ETHUSDT"],
@@ -179,8 +181,447 @@ def home():
         "sistema": "trading-ai",
         "ativos_monitorados": ATIVOS_MONITORADOS,
         "valor_por_trade_usdt": VALOR_POR_TRADE_USDT,
-        "estrategia_versao": ESTRATEGIA_VERSAO
+        "estrategia_versao": ESTRATEGIA_VERSAO,
+        "aprendizado_adaptativo": APRENDIZADO_ATIVO,
+        "modelo_ia": OPENAI_MODEL
     }
+
+
+
+# ============================================================
+# APRENDIZADO ADAPTATIVO - V1
+# ============================================================
+# O Railway NÃO reescreve o próprio código-fonte.
+# A cada 10 trades fechados, a IA pode propor no máximo 1 microajuste
+# de entrada por ativo. O executor local persiste e versiona esses
+# overrides em vertical_learning_state.json.
+#
+# Se o executor/ngrok ou a camada de aprendizado falhar, o robô
+# continua usando o baseline abaixo. A falha do aprendizado nunca
+# derruba o monitor de mercado.
+APRENDIZADO_ATIVO = True
+APRENDIZADO_CACHE_TTL = 60
+APRENDIZADO_TIMEOUT = 1.0
+APRENDIZADO_CACHE = {}
+APRENDIZADO_CACHE_TS = {}
+APRENDIZADO_CACHE_LOCK = threading.Lock()
+
+PARAMETROS_ADAPTAVEIS = {
+    "posicao_range_local_max",
+    "impulso_desde_fundo_max",
+    "rompimento_max_para_tp",
+    "distancia_preco_ema9_max",
+    "rejeicao_minima",
+    "volume_minimo_relativo",
+}
+
+LIMITES_ADAPTATIVOS = {
+    "posicao_range_local_max": (0.35, 0.60),
+    "impulso_desde_fundo_max": (0.0040, 0.0090),
+    "rompimento_max_para_tp": (0.0015, 0.0045),
+    "distancia_preco_ema9_max": (0.0035, 0.0065),
+    "rejeicao_minima": (0.0007, 0.0018),
+    "volume_minimo_relativo": (0.80, 1.05),
+}
+
+
+def _token_executor():
+    return os.getenv("APPROVAL_TOKEN", "")
+
+
+def obter_contexto_aprendizado(symbol, forcar=False):
+    """
+    Busca overrides e métricas aprendidas no executor local.
+    Fail-open para o baseline: se a consulta falhar, retorna {}.
+    """
+    symbol = symbol.upper()
+
+    if not APRENDIZADO_ATIVO or symbol not in CONFIG_ATIVOS:
+        return {}
+
+    agora = time.time()
+    with APRENDIZADO_CACHE_LOCK:
+        if (
+            not forcar
+            and symbol in APRENDIZADO_CACHE
+            and (agora - APRENDIZADO_CACHE_TS.get(symbol, 0)) < APRENDIZADO_CACHE_TTL
+        ):
+            return dict(APRENDIZADO_CACHE[symbol])
+
+    token = _token_executor()
+    if not token:
+        return {}
+
+    try:
+        r = requests.get(
+            f"{EXECUTOR_BASE_URL}/aprendizado-contexto/{symbol}",
+            params={"token": token},
+            timeout=APRENDIZADO_TIMEOUT
+        )
+        if r.status_code >= 400:
+            return {}
+
+        dados = r.json()
+        if not isinstance(dados, dict) or dados.get("status") == "bloqueado":
+            return {}
+
+        with APRENDIZADO_CACHE_LOCK:
+            APRENDIZADO_CACHE[symbol] = dados
+            APRENDIZADO_CACHE_TS[symbol] = agora
+
+        return dict(dados)
+    except Exception as e:
+        print("APRENDIZADO_CONTEXTO_INDISPONIVEL", symbol, str(e))
+        return {}
+
+
+def parametros_entrada_efetivos(symbol):
+    """
+    Retorna cópia do baseline + overrides aprovados/versionados.
+    Nunca altera CONFIG_ATIVOS em memória.
+    """
+    base = dict(CONFIG_ATIVOS[symbol]["entrada"])
+    contexto = obter_contexto_aprendizado(symbol)
+    overrides = contexto.get("active_overrides") if isinstance(contexto, dict) else {}
+
+    if not isinstance(overrides, dict):
+        return base, contexto
+
+    for chave, valor in overrides.items():
+        if chave not in PARAMETROS_ADAPTAVEIS:
+            continue
+        try:
+            valor = float(valor)
+            minimo, maximo = LIMITES_ADAPTATIVOS[chave]
+            if minimo <= valor <= maximo:
+                base[chave] = valor
+        except Exception:
+            continue
+
+    return base, contexto
+
+
+def calcular_contexto_1m(symbol):
+    """
+    Microcontexto apenas para TIMING da IA.
+    Não vira filtro duro e não substitui o setup 5m.
+    Se falhar, retorna contexto indisponível sem bloquear o robô.
+    """
+    try:
+        bruto = get_klines(symbol, interval="1m", limit=24)
+        data = bruto[:-1]
+        if len(data) < 12:
+            raise ValueError("historico_1m_insuficiente")
+
+        closes = [float(c[4]) for c in data]
+        highs = [float(c[2]) for c in data]
+        lows = [float(c[3]) for c in data]
+        volumes = [float(c[5]) for c in data]
+
+        ema5 = calcular_ema(closes[-12:], 5)
+        ema9 = calcular_ema(closes[-16:], 9)
+        ultimo_close = closes[-1]
+        penultimo_close = closes[-2]
+        ultimo_open = float(data[-1][1])
+
+        janela = 10
+        suporte = min(lows[-janela:])
+        resistencia = max(highs[-janela:])
+        largura = resistencia - suporte
+        posicao_range = (
+            (ultimo_close - suporte) / largura
+            if largura > 0 else 1.0
+        )
+
+        variacao_3m = (
+            (closes[-1] - closes[-4]) / closes[-4]
+            if len(closes) >= 4 and closes[-4] else 0.0
+        )
+        volume_medio_10 = sum(volumes[-10:]) / 10
+        volume_relativo = (
+            volumes[-1] / volume_medio_10
+            if volume_medio_10 > 0 else 0.0
+        )
+
+        retomada_micro = bool(
+            ultimo_close > penultimo_close
+            and ultimo_close >= ema5
+            and ema5 >= ema9
+        )
+
+        entrada_micro_estendida = bool(
+            posicao_range > 0.85
+            and variacao_3m > 0.0018
+        )
+
+        return {
+            "disponivel": True,
+            "ema5_1m": round(ema5, 8),
+            "ema9_1m": round(ema9, 8),
+            "tendencia_micro_alta": bool(ema5 >= ema9),
+            "retomada_micro": retomada_micro,
+            "ultimo_candle_verde_1m": bool(ultimo_close > ultimo_open),
+            "variacao_3m": round(variacao_3m, 6),
+            "posicao_range_10m": round(posicao_range, 6),
+            "volume_relativo_1m": round(volume_relativo, 4),
+            "entrada_micro_estendida": entrada_micro_estendida,
+        }
+    except Exception as e:
+        return {
+            "disponivel": False,
+            "erro": str(e)
+        }
+
+
+def registrar_contexto_sinal_no_executor(symbol, preview, tempo_sinal):
+    """
+    Guarda no executor o contexto técnico/IA do sinal para que,
+    quando o trade fechar, o aprendizado saiba exatamente como entrou.
+    Falha aqui NÃO bloqueia alerta nem execução.
+    """
+    if not APRENDIZADO_ATIVO:
+        return False
+
+    token = _token_executor()
+    if not token:
+        return False
+
+    try:
+        dados = preview.get("dados", {}) if isinstance(preview, dict) else {}
+        ia = preview.get("analise_ia", {}) if isinstance(preview, dict) else {}
+
+        payload = {
+            "ativo": symbol,
+            "tempo_sinal": int(tempo_sinal),
+            "preco_sinal": preview.get("entrada"),
+            "estrategia_versao": ESTRATEGIA_VERSAO,
+            "score_final": preview.get("score"),
+            "score_tecnico": dados.get("score_tecnico"),
+            "grau_setup": dados.get("grau_setup"),
+            "decisao_ia": ia.get("decisao"),
+            "qualidade_ia": ia.get("qualidade"),
+            "tipo_mercado_ia": ia.get("tipo_mercado"),
+            "risco_ia": ia.get("risco"),
+            "motivo_ia": ia.get("motivo"),
+            "features": {
+                "posicao_range_local": dados.get("posicao_range_local"),
+                "impulso_desde_fundo": dados.get("impulso_desde_fundo"),
+                "rompimento_necessario_para_tp": dados.get("rompimento_necessario_para_tp"),
+                "distancia_preco_ema9": dados.get("distancia_preco_ema9"),
+                "rsi": dados.get("rsi"),
+                "variacao_5": dados.get("variacao_5"),
+                "variacao_10": dados.get("variacao_10"),
+                "entrada_na_zona_baixa": dados.get("entrada_na_zona_baixa"),
+                "entrada_estendida": dados.get("entrada_estendida"),
+                "alvo_plausivel": dados.get("alvo_plausivel"),
+                "confirmacao_compra": dados.get("confirmacao_compra"),
+                "reacao_atual": dados.get("reacao_atual"),
+                "volume_ok": dados.get("volume_ok"),
+                "volume_candle_forte": dados.get("volume_candle_forte"),
+                "pressao_vendedora_forte": dados.get("pressao_vendedora_forte"),
+                "macro_baixista": dados.get("macro_baixista"),
+                "perto_resistencia_4h": dados.get("perto_resistencia_4h"),
+                "contexto_1m": dados.get("contexto_1m"),
+            },
+            "parametros_entrada": dados.get("parametros_entrada"),
+            "aprendizado": dados.get("aprendizado"),
+        }
+
+        r = requests.post(
+            f"{EXECUTOR_BASE_URL}/registrar-contexto-sinal",
+            params={"token": token},
+            json=payload,
+            timeout=APRENDIZADO_TIMEOUT
+        )
+        return r.status_code < 400
+    except Exception as e:
+        print("APRENDIZADO_REGISTRO_SINAL_FALHOU", symbol, str(e))
+        return False
+
+
+def _extrair_json_ia(texto):
+    texto = (texto or "").strip().replace("```json", "").replace("```", "").strip()
+    inicio = texto.find("{")
+    fim = texto.rfind("}") + 1
+    if inicio == -1 or fim <= inicio:
+        raise ValueError("Resposta da IA sem JSON válido")
+    return json.loads(texto[inicio:fim])
+
+
+def analisar_lote_aprendizado_com_ia(pendente):
+    """
+    A IA pode propor no máximo 1 alteração por ativo e somente
+    nos parâmetros permitidos. TP, SL, capital, ativos, OCO e
+    controles de segurança ficam fora do aprendizado automático.
+    """
+    prompt = f"""
+Você é o módulo de aprendizagem quantitativa de um robô Spot LONG BTC/USDT e ETH/USDT.
+
+OBJETIVO:
+Analisar um lote de 10 trades reais fechados e decidir se existe evidência suficiente
+para manter, reverter ou fazer UM microajuste de entrada por ativo.
+
+REGRAS OBRIGATÓRIAS:
+1. Não altere TP, SL, capital, ativos, OCO, APIs, limites de exposição ou segurança.
+2. Máximo de 1 parâmetro alterado por ativo neste lote.
+3. Parâmetros permitidos:
+   - posicao_range_local_max
+   - impulso_desde_fundo_max
+   - rompimento_max_para_tp
+   - distancia_preco_ema9_max
+   - rejeicao_minima
+   - volume_minimo_relativo
+4. Se o ativo tiver amostra insuficiente ou dados de entrada incompletos: MANTER.
+5. Não ajuste para "corrigir" um único loss.
+6. Priorize expectativa líquida, Profit Factor, MAE/MFE e padrões recorrentes.
+7. Se o lote posterior a uma mudança ficou claramente pior, você pode escolher ROLLBACK.
+8. Um ajuste deve ser pequeno. O executor ainda validará limites e variação máxima.
+9. Não confunda score com probabilidade de WIN.
+10. O objetivo é melhorar TIMING de entrada, não aumentar frequência artificialmente.
+
+BASELINES ATUAIS:
+{json.dumps({s: CONFIG_ATIVOS[s]["entrada"] for s in ATIVOS_MONITORADOS}, ensure_ascii=False)}
+
+LOTE PENDENTE:
+{json.dumps(pendente, ensure_ascii=False)}
+
+RESPONDA SOMENTE JSON PURO:
+{{
+  "batch_id": "id recebido",
+  "resumo": "conclusão curta",
+  "decisoes": [
+    {{
+      "ativo": "BTCUSDT",
+      "acao": "MANTER|AJUSTAR|ROLLBACK",
+      "parametro": "nome ou null",
+      "valor_novo": número ou null,
+      "motivo": "evidência objetiva e curta"
+    }},
+    {{
+      "ativo": "ETHUSDT",
+      "acao": "MANTER|AJUSTAR|ROLLBACK",
+      "parametro": "nome ou null",
+      "valor_novo": número ou null,
+      "motivo": "evidência objetiva e curta"
+    }}
+  ]
+}}
+"""
+
+    resposta = client.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        timeout=12
+    )
+    proposta = _extrair_json_ia(resposta.choices[0].message.content)
+
+    decisoes_validas = []
+    for decisao in proposta.get("decisoes", []):
+        if not isinstance(decisao, dict):
+            continue
+        ativo = str(decisao.get("ativo", "")).upper()
+        acao = str(decisao.get("acao", "MANTER")).upper()
+
+        if ativo not in ATIVOS_MONITORADOS:
+            continue
+        if acao not in {"MANTER", "AJUSTAR", "ROLLBACK"}:
+            acao = "MANTER"
+
+        parametro = decisao.get("parametro")
+        valor_novo = decisao.get("valor_novo")
+
+        if acao == "AJUSTAR":
+            if parametro not in PARAMETROS_ADAPTAVEIS:
+                acao = "MANTER"
+                parametro = None
+                valor_novo = None
+            else:
+                try:
+                    valor_novo = float(valor_novo)
+                    minimo, maximo = LIMITES_ADAPTATIVOS[parametro]
+                    if not (minimo <= valor_novo <= maximo):
+                        acao = "MANTER"
+                        parametro = None
+                        valor_novo = None
+                except Exception:
+                    acao = "MANTER"
+                    parametro = None
+                    valor_novo = None
+
+        decisoes_validas.append({
+            "ativo": ativo,
+            "acao": acao,
+            "parametro": parametro,
+            "valor_novo": valor_novo,
+            "motivo": str(decisao.get("motivo", ""))[:500]
+        })
+
+    return {
+        "batch_id": pendente.get("batch_id"),
+        "resumo": str(proposta.get("resumo", ""))[:1000],
+        "decisoes": decisoes_validas
+    }
+
+
+def processar_aprendizado_pendente():
+    if not APRENDIZADO_ATIVO:
+        return
+
+    token = _token_executor()
+    if not token:
+        return
+
+    r = requests.get(
+        f"{EXECUTOR_BASE_URL}/aprendizado-pendente",
+        params={"token": token},
+        timeout=APRENDIZADO_TIMEOUT
+    )
+    if r.status_code >= 400:
+        return
+
+    pendente = r.json()
+    if not isinstance(pendente, dict) or not pendente.get("pendente"):
+        return
+
+    proposta = analisar_lote_aprendizado_com_ia(pendente)
+
+    aplicar = requests.post(
+        f"{EXECUTOR_BASE_URL}/aprendizado-aplicar",
+        params={"token": token},
+        json=proposta,
+        timeout=3
+    )
+    if aplicar.status_code >= 400:
+        print("APRENDIZADO_APLICACAO_FALHOU", aplicar.status_code, aplicar.text[:500])
+        return
+
+    resultado = aplicar.json()
+
+    with APRENDIZADO_CACHE_LOCK:
+        APRENDIZADO_CACHE.clear()
+        APRENDIZADO_CACHE_TS.clear()
+
+    enviar_telegram(
+        "🧠 APRENDIZADO VERTICAL CONCLUÍDO\n\n"
+        f"Lote: {proposta.get('batch_id')}\n"
+        f"Resumo: {proposta.get('resumo')}\n"
+        f"Aplicação: {json.dumps(resultado.get('alteracoes', []), ensure_ascii=False)}"
+    )
+
+
+def loop_aprendizado_automatico():
+    """
+    Thread separada: qualquer erro de IA/aprendizado não interfere
+    no monitor de mercado nem no executor.
+    """
+    while True:
+        try:
+            processar_aprendizado_pendente()
+        except Exception as e:
+            print("ERRO_APRENDIZADO_AUTOMATICO:", str(e))
+        time.sleep(60)
+
 
 
 # =========================
@@ -427,7 +868,7 @@ def gerar_analise(symbol):
         raise ValueError("Ativo não permitido.")
 
     config = CONFIG_ATIVOS[symbol]
-    p = config["entrada"]
+    p, contexto_aprendizado = parametros_entrada_efetivos(symbol)
 
     data_bruta = get_klines(symbol, limit=50)
     data = data_bruta[:-1]  # estrutura somente com candles fechados
@@ -437,6 +878,7 @@ def gerar_analise(symbol):
 
     preco = float(get_preco_atual(symbol))
     contexto_4h = calcular_contexto_4h(symbol)
+    contexto_1m = calcular_contexto_1m(symbol)
 
     closes = [float(c[4]) for c in data]
     highs = [float(c[2]) for c in data]
@@ -786,6 +1228,14 @@ def gerar_analise(symbol):
         "perto_resistencia_4h": contexto_4h["perto_resistencia_4h"],
         "volume_4h_fraco": contexto_4h["volume_4h_fraco"],
         "contexto_4h_candle_fechado": contexto_4h.get("contexto_4h_candle_fechado"),
+        "contexto_1m": contexto_1m,
+        "aprendizado": {
+            "ativo": bool(APRENDIZADO_ATIVO),
+            "versao": contexto_aprendizado.get("learning_version") if isinstance(contexto_aprendizado, dict) else None,
+            "active_overrides": contexto_aprendizado.get("active_overrides", {}) if isinstance(contexto_aprendizado, dict) else {},
+            "total_trades_aprendidos": contexto_aprendizado.get("total_trades_aprendidos") if isinstance(contexto_aprendizado, dict) else None,
+            "ultimo_lote": contexto_aprendizado.get("ultimo_lote") if isinstance(contexto_aprendizado, dict) else None,
+        },
         "ajustes_score": ajustes_score,
         "parametros_entrada": dict(p)
     }
@@ -799,52 +1249,46 @@ def gerar_ia(symbol, dados=None):
         dados = gerar_analise(symbol)
 
     prompt = f"""
-Você é um analista quantitativo profissional especializado em trading spot de continuação/pullback.
-
-FUNÇÃO DESTE ROBÔ VERTICAL:
-Comprar uma tendência de alta APÓS correção, em localização favorável, sem perseguir preço
-nem depender de grande rompimento para alcançar o TP.
-
-A lógica foi adaptada do motor lateral que prioriza localização da entrada:
-- parte baixa do range local;
-- pouco impulso já gasto desde o fundo;
-- alvo plausível antes ou pouco além do teto local;
-- reação compradora real;
-- veto de pressão vendedora forte.
-
-APROVE PRINCIPALMENTE QUANDO:
-- setup_tecnico_ok = true;
-- tendencia_alta = true;
-- entrada_na_zona_baixa = true;
-- entrada_estendida = false;
-- alvo_plausivel = true;
-- confirmacao_compra = true;
-- não há veto_pressao_vendedora nem veto_macro.
-
-REPROVE PRINCIPALMENTE QUANDO:
-- preço já está alto no range local;
-- entrada está estendida após subida;
-- TP exige rompimento excessivo;
-- não existe reação compradora;
-- há pressão vendedora forte;
-- contexto 4h baixista coincide com pressão de venda.
-
-NÃO REPROVE AUTOMATICAMENTE APENAS POR:
-- um único candle vermelho;
-- volume normal isoladamente;
-- existência de resistência local, se o alvo continua plausível.
+Você é a camada de TIMING de um robô profissional Spot LONG de BTC/USDT e ETH/USDT.
 
 IMPORTANTE:
-Score não é probabilidade de WIN.
-Se os dados técnicos não sustentarem a compra, reprove.
+- A direção e a segurança estrutural vêm das regras quantitativas.
+- Sua função é escolher o melhor MOMENTO entre ENTER, WAIT e REJECT.
+- WAIT é uma decisão válida e deve ser usada quando a ideia é boa, mas a entrada ainda está prematura,
+  estendida, perto demais da máxima/resistência ou sem retomada micro suficiente.
+- REJECT quando o cenário perdeu qualidade ou contradiz a tese.
+- ENTER somente quando o setup técnico está aprovado e o timing atual oferece relação razoável
+  entre espaço até o alvo e risco de stop.
+
+COMO USAR O CONTEXTO 1m:
+- É apenas microtiming; não substitui o 5m.
+- Se contexto_1m.disponivel=false, NÃO reprove só por isso.
+- Prefira WAIT se entrada_micro_estendida=true.
+- Retomada_micro=true, tendência_micro_alta e volume relativo saudável favorecem ENTER,
+  desde que o 5m já esteja tecnicamente aprovado.
+
+COMO USAR O APRENDIZADO:
+- "aprendizado.active_overrides" representa ajustes já aprovados em lotes anteriores.
+- "aprendizado.ultimo_lote" é evidência histórica recente, não garantia.
+- Não invente padrões que os dados não sustentam.
+- Não mude parâmetros aqui. Apenas decida o timing do trade atual.
+
+REGRAS:
+- Score NÃO é probabilidade de WIN.
+- Não persiga preço.
+- Evite entrada próxima de teto local se o TP depender de rompimento adicional relevante.
+- Dê peso a posição no range, impulso já gasto, distância da EMA9, confirmação, pressão vendedora,
+  contexto 4h e microtiming 1m.
+- Se o setup técnico não estiver aprovado, nunca retorne ENTER.
 
 RESPONDA SOMENTE JSON PURO:
 {{
+  "decisao": "ENTER|WAIT|REJECT",
   "aprovar": true ou false,
   "qualidade": número de 0 a 100,
   "tipo_mercado": "tendencia_pullback | tendencia_forte | falsa_reacao | entrada_atrasada | pressao_vendedora | indefinido",
   "risco": "baixo | medio | alto",
-  "motivo": "explicação curta e técnica"
+  "motivo": "explicação curta, técnica e específica sobre o timing"
 }}
 
 DADOS:
@@ -853,23 +1297,32 @@ DADOS:
 
     try:
         resposta = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=OPENAI_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
+            temperature=0.0,
             timeout=8
         )
 
-        texto = resposta.choices[0].message.content.strip()
-        texto = texto.replace("```json", "").replace("```", "").strip()
-        inicio = texto.find("{")
-        fim = texto.rfind("}") + 1
-        if inicio == -1 or fim <= inicio:
-            raise ValueError("Resposta da IA sem JSON válido")
-        ia = json.loads(texto[inicio:fim])
+        ia = _extrair_json_ia(resposta.choices[0].message.content)
+        decisao = str(ia.get("decisao", "")).upper()
+
+        if decisao not in {"ENTER", "WAIT", "REJECT"}:
+            decisao = "ENTER" if ia.get("aprovar") is True else "REJECT"
+
+        if not dados.get("setup_tecnico_ok") and decisao == "ENTER":
+            decisao = "WAIT"
+
+        ia["decisao"] = decisao
+        ia["aprovar"] = bool(decisao == "ENTER")
+        try:
+            ia["qualidade"] = max(0, min(int(ia.get("qualidade", 0)), 100))
+        except Exception:
+            ia["qualidade"] = 0
 
     except Exception as e:
         print("ERRO_IA:", str(e))
         ia = {
+            "decisao": "REJECT",
             "aprovar": False,
             "qualidade": 0,
             "tipo_mercado": "erro_ia",
@@ -954,9 +1407,24 @@ def ordem_preview(symbol: str):
         dados = gerar_analise(symbol)
         score_tecnico = int(dados.get("score_tecnico", 0))
 
-        # Igual ao princípio do lateral: IA só entra depois do pré-filtro técnico.
-        # Isso reduz latência/custo e evita que IA tente "salvar" setup ruim.
+        # A IA de timing observa também setups QUASE_APROVADOS para aprender
+        # a diferença entre WAIT e REJECT. Segurança preservada: somente
+        # setup_tecnico_ok pode virar ordem real.
         if not dados.get("setup_tecnico_ok"):
+            if dados.get("grau_setup") == "QUASE_APROVADO":
+                resultado_ia = gerar_ia(symbol, dados=dados)
+                ia_quase = resultado_ia.get("analise_ia", {})
+                return {
+                    "ativo": symbol,
+                    "grupo": obter_grupo(symbol),
+                    "pode_operar": False,
+                    "motivo": f"TIMING_{ia_quase.get('decisao', 'WAIT')}: "
+                              + (" | ".join(dados.get("motivos_bloqueio", [])) or "Setup ainda não aprovado"),
+                    "score": resultado_ia.get("score", score_tecnico),
+                    "dados": dados,
+                    "analise_ia": ia_quase
+                }
+
             return {
                 "ativo": symbol,
                 "grupo": obter_grupo(symbol),
@@ -965,11 +1433,12 @@ def ordem_preview(symbol: str):
                 "score": score_tecnico,
                 "dados": dados,
                 "analise_ia": {
+                    "decisao": "REJECT",
                     "aprovar": False,
                     "qualidade": 0,
                     "tipo_mercado": "prefiltro_tecnico",
                     "risco": "alto",
-                    "motivo": "IA não chamada porque o setup técnico não passou"
+                    "motivo": "Setup técnico distante; IA de timing não chamada"
                 }
             }
 
@@ -979,11 +1448,16 @@ def ordem_preview(symbol: str):
         qualidade_minima = int(CONFIG_ATIVOS[symbol]["entrada"]["qualidade_ia_minima"])
 
         if not ia.get("aprovar"):
+            decisao_ia = str(ia.get("decisao", "REJECT")).upper()
             return {
                 "ativo": symbol,
                 "grupo": obter_grupo(symbol),
                 "pode_operar": False,
-                "motivo": "IA não aprovou o setup técnico",
+                "motivo": (
+                    "IA decidiu WAIT: setup bom, mas timing ainda não ideal"
+                    if decisao_ia == "WAIT"
+                    else "IA rejeitou o timing atual"
+                ),
                 "score": score,
                 "dados": dados,
                 "analise_ia": ia
@@ -1364,7 +1838,10 @@ def monitorar_mercado():
                         "alvo_plausivel": dados_sinal.get("alvo_plausivel"),
                         "confirmacao_compra": dados_sinal.get("confirmacao_compra"),
                         "reacao_atual": dados_sinal.get("reacao_atual"),
-                        "pressao_vendedora_forte": dados_sinal.get("pressao_vendedora_forte")
+                        "pressao_vendedora_forte": dados_sinal.get("pressao_vendedora_forte"),
+                        "decisao_ia": preview.get("analise_ia", {}).get("decisao"),
+                        "qualidade_ia": preview.get("analise_ia", {}).get("qualidade"),
+                        "aprendizado_versao": dados_sinal.get("aprendizado", {}).get("versao")
                     })
 
                     mensagem = f"""🚨 OPORTUNIDADE DETECTADA
@@ -1380,11 +1857,19 @@ Valor planejado: {preview['valor_usdt']} USDT
 
 ⚠️ Sinal com validade curta. Aprove somente se fizer sentido."""
 
+                    tempo_sinal = int(time.time())
+
+                    registrar_contexto_sinal_no_executor(
+                        symbol,
+                        preview,
+                        tempo_sinal
+                    )
+
                     enviar_telegram(
                         mensagem,
                         symbol=symbol,
                         preco=preview["entrada"],
-                        tempo=int(time.time())
+                        tempo=tempo_sinal
                     )
 
                     ultimos_sinais[symbol] = agora
@@ -1399,5 +1884,16 @@ Valor planejado: {preview['valor_usdt']} USDT
 
 @app.on_event("startup")
 def iniciar_monitoramento():
-    thread = threading.Thread(target=monitorar_mercado, daemon=True)
-    thread.start()
+    thread_mercado = threading.Thread(
+        target=monitorar_mercado,
+        name="vertical-market-monitor",
+        daemon=True
+    )
+    thread_mercado.start()
+
+    thread_aprendizado = threading.Thread(
+        target=loop_aprendizado_automatico,
+        name="vertical-learning-monitor",
+        daemon=True
+    )
+    thread_aprendizado.start()
