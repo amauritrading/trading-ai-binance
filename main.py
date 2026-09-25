@@ -21,7 +21,7 @@ BINANCE_API_URL = "https://api.binance.com"
 BINANCE_DATA_URL = "https://data-api.binance.vision"
 
 VALOR_POR_TRADE_USDT = 10
-ESTRATEGIA_VERSAO = "vertical_hibrido_v3_1_sol_janela6_20260924"
+ESTRATEGIA_VERSAO = "vertical_hibrido_v3_1_btc_eth_20260924"
 
 # Parâmetros reais do executor local principal (porta 8001).
 # Mantidos centralizados para evitar divergência entre preview, mensagem e execução.
@@ -86,37 +86,14 @@ CONFIG_ATIVOS = {
             "volume_pressao_relativo": 1.20,
             "amplitude_minima": 0.0060
         }
-    },
-    "SOLUSDT": {
-        "valor_usd": VALOR_POR_TRADE_USDT,
-        "qty_decimals": 3,
-        "price_decimals": 2,
-        "grupo": "CORE",
-        "entrada": {
-            # SOL tolera um pouco mais de deslocamento/ruído, mas exige
-            # posição mais baixa no range para não perseguir candle explosivo.
-            "janela_range_local": 6,
-            "posicao_range_local_max": 0.50,
-            "impulso_desde_fundo_max": 0.0070,
-            "rompimento_max_para_tp": 0.0035,
-            "distancia_preco_ema9_max": 0.0055,
-            "rejeicao_minima": 0.0013,
-            "volume_minimo_relativo": 0.92,
-            "score_minimo": 82,
-            "qualidade_ia_minima": 72,
-            "corpo_pressao_min": 0.58,
-            "volume_pressao_relativo": 1.20,
-            "amplitude_minima": 0.0065
-        }
-    }
-}
+    },}
 
 GRUPOS = {
-    "CORE": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "CORE": ["BTCUSDT", "ETHUSDT"],
     "ALT": []
 }
 
-ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+ATIVOS_MONITORADOS = ["BTCUSDT", "ETHUSDT"]
 
 ultimos_sinais = {}
 
